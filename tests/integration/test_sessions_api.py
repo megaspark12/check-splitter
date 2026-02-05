@@ -1,0 +1,305 @@
+"""
+Integration tests for the Sessions API.
+
+TDD: These tests are written FIRST, before the implementation.
+Run with: pytest tests/integration/test_sessions_api.py -v
+"""
+import pytest
+from httpx import AsyncClient
+
+
+class TestSessionCreation:
+    """Tests for creating new sessions."""
+    
+    @pytest.mark.asyncio
+    async def test_create_session_returns_session_code(self, client: AsyncClient):
+        """Creating a session returns a unique session code."""
+        response = await client.post(
+            "/api/sessions",
+            json={"host_name": "Alice"}
+        )
+        
+        assert response.status_code == 201
+        data = response.json()
+        assert "code" in data
+        assert len(data["code"]) == 6
+        assert data["code"].isalnum()
+    
+    @pytest.mark.asyncio
+    async def test_create_session_creates_host_participant(self, client: AsyncClient):
+        """Creating a session also creates the host as a participant."""
+        response = await client.post(
+            "/api/sessions",
+            json={"host_name": "Alice"}
+        )
+        
+        assert response.status_code == 201
+        data = response.json()
+        session_code = data["code"]
+        
+        # Get participants
+        participants_response = await client.get(
+            f"/api/sessions/{session_code}/participants"
+        )
+        
+        assert participants_response.status_code == 200
+        participants = participants_response.json()
+        assert len(participants) == 1
+        assert participants[0]["name"] == "Alice"
+        assert participants[0]["is_host"] == True
+    
+    @pytest.mark.asyncio
+    async def test_create_session_requires_host_name(self, client: AsyncClient):
+        """Creating a session requires a host name."""
+        response = await client.post(
+            "/api/sessions",
+            json={}
+        )
+        
+        assert response.status_code == 422  # Validation error
+    
+    @pytest.mark.asyncio
+    async def test_session_codes_are_unique(self, client: AsyncClient):
+        """Each session gets a unique code."""
+        codes = set()
+        for _ in range(5):
+            response = await client.post(
+                "/api/sessions",
+                json={"host_name": "Host"}
+            )
+            assert response.status_code == 201
+            codes.add(response.json()["code"])
+        
+        assert len(codes) == 5
+
+
+class TestSessionRetrieval:
+    """Tests for retrieving sessions."""
+    
+    @pytest.mark.asyncio
+    async def test_get_session_by_code(self, client: AsyncClient):
+        """Can retrieve a session by its code."""
+        # Create session
+        create_response = await client.post(
+            "/api/sessions",
+            json={"host_name": "Alice"}
+        )
+        session_code = create_response.json()["code"]
+        
+        # Get session
+        response = await client.get(f"/api/sessions/{session_code}")
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert data["code"] == session_code
+        assert data["status"] == "pending"
+    
+    @pytest.mark.asyncio
+    async def test_get_nonexistent_session_returns_404(self, client: AsyncClient):
+        """Getting a non-existent session returns 404."""
+        response = await client.get("/api/sessions/NOTFND")
+        
+        assert response.status_code == 404
+    
+    @pytest.mark.asyncio
+    async def test_session_code_is_case_insensitive(self, client: AsyncClient):
+        """Session codes are case-insensitive."""
+        create_response = await client.post(
+            "/api/sessions",
+            json={"host_name": "Alice"}
+        )
+        session_code = create_response.json()["code"]
+        
+        # Try getting with different case
+        response = await client.get(f"/api/sessions/{session_code.lower()}")
+        assert response.status_code == 200
+        
+        response = await client.get(f"/api/sessions/{session_code.upper()}")
+        assert response.status_code == 200
+
+
+class TestSessionQRCode:
+    """Tests for QR code generation."""
+    
+    @pytest.mark.asyncio
+    async def test_get_session_qr_code(self, client: AsyncClient):
+        """Can get a QR code image for a session."""
+        # Create session
+        create_response = await client.post(
+            "/api/sessions",
+            json={"host_name": "Alice"}
+        )
+        session_code = create_response.json()["code"]
+        
+        # Get QR code
+        response = await client.get(f"/api/sessions/{session_code}/qr")
+        
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "image/png"
+
+
+class TestSessionSummary:
+    """Tests for session bill summary."""
+    
+    @pytest.mark.asyncio
+    async def test_get_session_summary(self, client: AsyncClient):
+        """Can get the bill split summary for a session."""
+        # Create session
+        create_response = await client.post(
+            "/api/sessions",
+            json={"host_name": "Alice"}
+        )
+        session_code = create_response.json()["code"]
+        
+        # Get summary
+        response = await client.get(f"/api/sessions/{session_code}/summary")
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert "participants" in data
+        assert "unassigned_items" in data
+    
+    @pytest.mark.asyncio
+    async def test_summary_calculates_bill_split(self, client: AsyncClient):
+        """Summary correctly calculates bill split."""
+        # Create session
+        create_response = await client.post(
+            "/api/sessions",
+            json={"host_name": "Alice"}
+        )
+        session_code = create_response.json()["code"]
+        
+        # Add another participant
+        await client.post(
+            f"/api/sessions/{session_code}/participants",
+            json={"name": "Bob"}
+        )
+        
+        # Add items
+        burger_response = await client.post(
+            f"/api/sessions/{session_code}/items",
+            json={"name": "Burger", "price": "15.00"}
+        )
+        burger_id = burger_response.json()["id"]
+        
+        salad_response = await client.post(
+            f"/api/sessions/{session_code}/items",
+            json={"name": "Salad", "price": "12.00"}
+        )
+        salad_id = salad_response.json()["id"]
+        
+        # Get participants to get their IDs
+        participants_response = await client.get(
+            f"/api/sessions/{session_code}/participants"
+        )
+        participants = participants_response.json()
+        alice_id = next(p["id"] for p in participants if p["name"] == "Alice")
+        bob_id = next(p["id"] for p in participants if p["name"] == "Bob")
+        
+        # Assign items
+        await client.post(
+            f"/api/sessions/{session_code}/assignments",
+            json={"item_id": burger_id, "participant_id": alice_id}
+        )
+        await client.post(
+            f"/api/sessions/{session_code}/assignments",
+            json={"item_id": salad_id, "participant_id": bob_id}
+        )
+        
+        # Set tips
+        await client.put(
+            f"/api/sessions/{session_code}/participants/{alice_id}",
+            json={"tip_percentage": "20.00"}
+        )
+        await client.put(
+            f"/api/sessions/{session_code}/participants/{bob_id}",
+            json={"tip_percentage": "15.00"}
+        )
+        
+        # Get summary
+        response = await client.get(f"/api/sessions/{session_code}/summary")
+        
+        assert response.status_code == 200
+        data = response.json()
+        
+        # Find Alice's summary
+        alice_summary = next(
+            p for p in data["participants"] 
+            if p["participant_name"] == "Alice"
+        )
+        assert float(alice_summary["items_subtotal"]) == 15.00
+        assert float(alice_summary["tip_amount"]) == 3.00  # 20% of $15
+        
+        # Find Bob's summary
+        bob_summary = next(
+            p for p in data["participants"] 
+            if p["participant_name"] == "Bob"
+        )
+        assert float(bob_summary["items_subtotal"]) == 12.00
+        assert float(bob_summary["tip_amount"]) == 1.80  # 15% of $12
+
+
+class TestSessionDeletion:
+    """Tests for deleting sessions."""
+    
+    @pytest.mark.asyncio
+    async def test_delete_session(self, client: AsyncClient):
+        """Can delete a session."""
+        # Create session
+        create_response = await client.post(
+            "/api/sessions",
+            json={"host_name": "Alice"}
+        )
+        session_code = create_response.json()["code"]
+        
+        # Delete session
+        response = await client.delete(f"/api/sessions/{session_code}")
+        
+        assert response.status_code == 204
+        
+        # Verify session is gone
+        get_response = await client.get(f"/api/sessions/{session_code}")
+        assert get_response.status_code == 404
+
+
+class TestReceiptUpload:
+    """Tests for uploading receipt images."""
+    
+    @pytest.mark.asyncio
+    async def test_upload_receipt_invalid_session(self, client: AsyncClient):
+        """Upload to non-existent session returns 404."""
+        # Create a minimal fake image (1x1 white JPEG)
+        from io import BytesIO
+        from PIL import Image
+        
+        img = Image.new("RGB", (100, 100), color="white")
+        img_bytes = BytesIO()
+        img.save(img_bytes, format="JPEG")
+        img_bytes.seek(0)
+        
+        response = await client.post(
+            "/api/sessions/INVALID/receipt",
+            files={"file": ("receipt.jpg", img_bytes, "image/jpeg")}
+        )
+        
+        assert response.status_code == 404
+    
+    @pytest.mark.asyncio
+    async def test_upload_receipt_invalid_file_type(self, client: AsyncClient):
+        """Upload of non-image file returns 400."""
+        # Create session
+        create_response = await client.post(
+            "/api/sessions",
+            json={"host_name": "Alice"}
+        )
+        session_code = create_response.json()["code"]
+        
+        # Try to upload a text file
+        response = await client.post(
+            f"/api/sessions/{session_code}/receipt",
+            files={"file": ("receipt.txt", b"not an image", "text/plain")}
+        )
+        
+        assert response.status_code == 400
+        assert "not allowed" in response.json()["detail"]
+
