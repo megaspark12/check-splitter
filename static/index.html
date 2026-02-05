@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en" dir="auto">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Receipt Splitter</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Landing Page -->
+        <div id="landing-page" class="page active">
+            <div class="landing-hero">
+                <div class="logo">🧾</div>
+                <h1>Receipt Splitter</h1>
+                <p class="tagline">Split bills fairly with friends in seconds</p>
+            </div>
+
+            <div class="landing-actions">
+                <div class="card">
+                    <h2>Start New Session</h2>
+                    <p class="card-desc">Upload a receipt and invite friends to split</p>
+                    <form id="create-session-form">
+                        <div class="input-group">
+                            <input type="text" id="host-name" placeholder="Your name" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary btn-large">
+                            <span class="btn-icon">➕</span>
+                            Create Session
+                        </button>
+                    </form>
+                </div>
+
+                <div class="divider">
+                    <span>or</span>
+                </div>
+
+                <div class="card card-secondary">
+                    <h2>Join Session</h2>
+                    <p class="card-desc">Enter the code shared by your friend</p>
+                    <form id="join-session-form">
+                        <div class="input-row">
+                            <input type="text" id="session-code" placeholder="Session code" maxlength="6" required>
+                            <input type="text" id="join-name" placeholder="Your name" required>
+                        </div>
+                        <button type="submit" class="btn btn-secondary">
+                            <span class="btn-icon">🔗</span>
+                            Join Session
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Host Session Page -->
+        <div id="session-page" class="page">
+            <header class="session-header">
+                <div class="session-code-display">
+                    <span class="label">Session Code</span>
+                    <div class="code-row">
+                        <span id="display-code" class="code"></span>
+                    </div>
+                    <div class="code-actions">
+                        <button id="copy-code-btn" class="btn btn-small btn-secondary">
+                            <span class="btn-icon">📋</span>
+                            <span id="copy-btn-text">Copy Code</span>
+                        </button>
+                        <button id="show-qr-btn" class="btn btn-small btn-secondary">
+                            <span class="btn-icon">📱</span>
+                            QR Code
+                        </button>
+                    </div>
+                </div>
+            </header>
+
+            <!-- QR Modal -->
+            <div id="qr-modal" class="modal">
+                <div class="modal-content">
+                    <button class="close-btn">&times;</button>
+                    <h3>Scan to Join</h3>
+                    <img id="qr-image" src="" alt="QR Code">
+                    <p class="qr-code-text">Code: <strong id="qr-code-text"></strong></p>
+                </div>
+            </div>
+
+            <!-- Steps Progress -->
+            <div class="steps-indicator">
+                <div class="step active" data-step="1">
+                    <span class="step-num">1</span>
+                    <span class="step-label">Upload</span>
+                </div>
+                <div class="step-line"></div>
+                <div class="step" data-step="2">
+                    <span class="step-num">2</span>
+                    <span class="step-label">Review</span>
+                </div>
+                <div class="step-line"></div>
+                <div class="step" data-step="3">
+                    <span class="step-num">3</span>
+                    <span class="step-label">Split</span>
+                </div>
+            </div>
+
+            <!-- Upload Receipt Section -->
+            <div id="upload-section" class="card">
+                <div class="card-header">
+                    <h2>📷 Upload Receipt</h2>
+                </div>
+                <div class="upload-options">
+                    <button id="camera-btn" class="btn btn-secondary upload-option-btn">
+                        <span class="btn-icon">📸</span>
+                        Take Photo
+                    </button>
+                    <button id="gallery-btn" class="btn btn-secondary upload-option-btn">
+                        <span class="btn-icon">🖼️</span>
+                        Choose from Gallery
+                    </button>
+                </div>
+                <input type="file" id="receipt-input" accept="image/*" hidden>
+                <input type="file" id="camera-input" accept="image/*" capture="environment" hidden>
+                <div class="upload-area" id="upload-area">
+                    <div class="upload-placeholder">
+                        <div class="upload-icon">📤</div>
+                        <p class="upload-text">Or drag receipt here</p>
+                        <p class="upload-hint">JPEG, PNG, or WebP</p>
+                    </div>
+                    <img id="receipt-preview" class="receipt-preview" hidden>
+                </div>
+                <button id="process-btn" class="btn btn-primary" disabled>
+                    <span class="btn-icon">✨</span>
+                    Process with AI
+                </button>
+                <div id="processing-status" class="status-indicator" hidden>
+                    <div class="spinner"></div>
+                    <span>Analyzing receipt...</span>
+                </div>
+            </div>
+
+            <!-- Items Section -->
+            <div id="items-section" class="card" hidden>
+                <div class="card-header">
+                    <h2>🍽️ Items Found</h2>
+                    <span id="items-count" class="badge">0</span>
+                </div>
+                <div id="items-list" class="items-grid"></div>
+                
+                <div class="add-item-section">
+                    <h4>Add Item Manually</h4>
+                    <div class="input-row">
+                        <input type="text" id="new-item-name" placeholder="Item name">
+                        <input type="number" id="new-item-price" placeholder="Price" step="0.01" min="0">
+                        <button id="add-item-btn" class="btn btn-small btn-secondary">Add</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Host's Own Item Selection -->
+            <div id="host-selection-section" class="card" hidden>
+                <div class="card-header">
+                    <h2>👆 Select Your Items</h2>
+                </div>
+                <div class="instructions-banner">
+                    <span class="instructions-icon">💡</span>
+                    <p>Tap the items you ordered</p>
+                </div>
+                <div id="host-items-list" class="items-grid selectable"></div>
+                
+                <!-- Host Tip Selection -->
+                <div class="tip-section-host">
+                    <h4>💵 Add Your Tip</h4>
+                    <div class="tip-selector host-tip-selector">
+                        <button class="tip-btn host-tip-btn" data-tip="0">No Tip</button>
+                        <button class="tip-btn host-tip-btn" data-tip="10">10%</button>
+                        <button class="tip-btn host-tip-btn" data-tip="15">15%</button>
+                        <button class="tip-btn host-tip-btn" data-tip="18">18%</button>
+                        <button class="tip-btn host-tip-btn active" data-tip="20">20%</button>
+                        <button class="tip-btn host-tip-btn" data-tip="25">25%</button>
+                    </div>
+                </div>
+                
+                <div class="host-total">
+                    <div class="total-row">
+                        <span>Your Items</span>
+                        <span id="host-items-total">$0.00</span>
+                    </div>
+                    <div class="total-row">
+                        <span>Your Tax</span>
+                        <span id="host-tax">$0.00</span>
+                    </div>
+                    <div class="total-row">
+                        <span>Your Tip (<span id="host-tip-percent">20</span>%)</span>
+                        <span id="host-tip">$0.00</span>
+                    </div>
+                    <div class="total-grand">
+                        <span>Your Total</span>
+                        <span id="host-grand-total">$0.00</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Participants Section -->
+            <div id="participants-section" class="card">
+                <div class="card-header">
+                    <h2>👥 Participants</h2>
+                    <span id="participants-count" class="badge">0</span>
+                </div>
+                <div id="participants-list" class="participants-grid"></div>
+                <p class="help-text">Share the session code above for friends to join</p>
+            </div>
+
+            <!-- Summary Section -->
+            <div id="summary-section" class="card" hidden>
+                <div class="card-header">
+                    <h2>💰 Bill Summary</h2>
+                </div>
+                <div id="summary-content" class="summary-grid"></div>
+            </div>
+
+            <button id="calculate-btn" class="btn btn-primary btn-large btn-floating" hidden>
+                <span class="btn-icon">🧮</span>
+                Calculate Split
+            </button>
+        </div>
+
+        <!-- Participant View -->
+        <div id="participant-page" class="page">
+            <header class="session-header participant-header">
+                <div class="participant-info">
+                    <span id="participant-name-display" class="participant-name"></span>
+                    <span class="session-badge">Session: <strong id="participant-session-code"></strong></span>
+                </div>
+            </header>
+
+            <!-- Instructions -->
+            <div class="instructions-banner">
+                <span class="instructions-icon">👆</span>
+                <p>Tap the items you ordered to select them</p>
+            </div>
+
+            <!-- Item Selection -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>Select Your Items</h2>
+                </div>
+                <div id="participant-items-list" class="items-grid selectable"></div>
+            </div>
+
+            <!-- Tip Selection -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>💵 Add Tip</h2>
+                </div>
+                <div class="tip-selector">
+                    <button class="tip-btn" data-tip="0">No Tip</button>
+                    <button class="tip-btn" data-tip="10">10%</button>
+                    <button class="tip-btn" data-tip="15">15%</button>
+                    <button class="tip-btn" data-tip="18">18%</button>
+                    <button class="tip-btn active" data-tip="20">20%</button>
+                    <button class="tip-btn" data-tip="25">25%</button>
+                </div>
+                <div id="custom-tip-section" class="custom-tip">
+                    <label>Or enter custom amount:</label>
+                    <div class="input-with-suffix">
+                        <input type="number" id="custom-tip-value" placeholder="0" min="0" max="100">
+                        <span class="suffix">%</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Refresh Button -->
+            <button id="refresh-btn" class="btn btn-secondary" style="width: 100%; margin-bottom: 16px;">
+                <span class="btn-icon">🔄</span>
+                Refresh Items
+            </button>
+
+            <!-- Your Total - Sticky Footer -->
+            <div class="total-card">
+                <div class="total-breakdown">
+                    <div class="total-row">
+                        <span>Your Items</span>
+                        <span id="your-items-total">$0.00</span>
+                    </div>
+                    <div class="total-row">
+                        <span>Tax (proportional)</span>
+                        <span id="your-tax">$0.00</span>
+                    </div>
+                    <div class="total-row">
+                        <span>Tip (<span id="tip-percent-display">20</span>%)</span>
+                        <span id="your-tip">$0.00</span>
+                    </div>
+                </div>
+                <div class="total-grand">
+                    <span>Your Total</span>
+                    <span id="your-grand-total">$0.00</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
