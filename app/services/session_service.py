@@ -57,7 +57,7 @@ class SessionService:
         code = await self.generate_unique_code()
         
         expires_at = datetime.utcnow() + timedelta(
-            hours=self.settings.session_expiry_hours
+            minutes=self.settings.session_expiry_minutes
         )
         
         session = Session(

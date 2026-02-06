@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-2.5-flash-preview-05-20"  # Latest vision model
     
     # Session
-    session_expiry_hours: int = 24
+    session_expiry_minutes: int = 15
     session_code_length: int = 6
     
     class Config:

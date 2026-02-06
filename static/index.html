@@ -113,6 +113,10 @@
                             <span class="btn-icon">📱</span>
                             QR Code
                         </button>
+                        <button id="end-session-btn" class="btn btn-small btn-danger">
+                            <span class="btn-icon">🚪</span>
+                            End Session
+                        </button>
                     </div>
                 </div>
             </header>
@@ -206,10 +210,10 @@
                     <h4>💵 Add Your Tip</h4>
                     <div class="tip-selector host-tip-selector">
                         <button class="tip-btn host-tip-btn" data-tip="0">No Tip</button>
-                        <button class="tip-btn host-tip-btn" data-tip="10">10%</button>
+                        <button class="tip-btn host-tip-btn active" data-tip="10">10%</button>
                         <button class="tip-btn host-tip-btn" data-tip="15">15%</button>
                         <button class="tip-btn host-tip-btn" data-tip="18">18%</button>
-                        <button class="tip-btn host-tip-btn active" data-tip="20">20%</button>
+                        <button class="tip-btn host-tip-btn" data-tip="20">20%</button>
                         <button class="tip-btn host-tip-btn" data-tip="25">25%</button>
                     </div>
                 </div>
@@ -224,7 +228,7 @@
                         <span id="host-tax">$0.00</span>
                     </div>
                     <div class="total-row">
-                        <span>Your Tip (<span id="host-tip-percent">20</span>%)</span>
+                        <span>Your Tip (<span id="host-tip-percent">10</span>%)</span>
                         <span id="host-tip">$0.00</span>
                     </div>
                     <div class="total-grand">
@@ -283,10 +287,10 @@
                 </div>
                 <div class="tip-selector">
                     <button class="tip-btn" data-tip="0">No Tip</button>
-                    <button class="tip-btn" data-tip="10">10%</button>
+                    <button class="tip-btn active" data-tip="10">10%</button>
                     <button class="tip-btn" data-tip="15">15%</button>
                     <button class="tip-btn" data-tip="18">18%</button>
-                    <button class="tip-btn active" data-tip="20">20%</button>
+                    <button class="tip-btn" data-tip="20">20%</button>
                     <button class="tip-btn" data-tip="25">25%</button>
                 </div>
                 <div id="custom-tip-section" class="custom-tip">
@@ -316,7 +320,7 @@
                         <span id="your-tax">$0.00</span>
                     </div>
                     <div class="total-row">
-                        <span>Tip (<span id="tip-percent-display">20</span>%)</span>
+                        <span>Tip (<span id="tip-percent-display">10</span>%)</span>
                         <span id="your-tip">$0.00</span>
                     </div>
                 </div>
@@ -324,6 +328,21 @@
                     <span>Your Total</span>
                     <span id="your-grand-total">$0.00</span>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="toast"></div>
+
+    <!-- Confirmation Modal -->
+    <div id="confirm-modal" class="modal">
+        <div class="modal-content confirm-modal-content">
+            <h3 id="confirm-title">Confirm</h3>
+            <p id="confirm-message"></p>
+            <div class="confirm-buttons">
+                <button id="confirm-cancel" class="btn btn-secondary">Cancel</button>
+                <button id="confirm-ok" class="btn btn-danger">Remove</button>
             </div>
         </div>
     </div>

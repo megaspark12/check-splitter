@@ -9,7 +9,7 @@ const API_BASE = '/api';
 let currentSession = null;
 let currentParticipant = null;
 let isHost = false;
-let currentTipPercentage = 20;
+let currentTipPercentage = 10;
 let syncInterval = null;
 let currency = { code: 'USD', symbol: '$', name: 'US Dollar' };
 
@@ -42,7 +42,7 @@ function startSync() {
         try {
             await syncSession();
         } catch (error) {
-            console.error('Sync error:', error);
+            // Sync errors are handled inside syncSession
         }
     }, 3000); // Sync every 3 seconds
 }
@@ -55,28 +55,67 @@ function stopSync() {
 }
 
 async function syncSession() {
-    const session = await apiRequest(`/sessions/${currentSession.code}`);
-    
-    // Check if data changed (compare JSON)
-    const oldItemsJson = JSON.stringify(currentSession.items);
-    const newItemsJson = JSON.stringify(session.items);
-    const oldParticipantsJson = JSON.stringify(currentSession.participants);
-    const newParticipantsJson = JSON.stringify(session.participants);
-    
-    if (oldItemsJson !== newItemsJson || oldParticipantsJson !== newParticipantsJson) {
+    try {
+        const session = await apiRequest(`/sessions/${currentSession.code}`);
+        
+        // Check if current participant was removed (for non-hosts)
+        if (!isHost && currentParticipant) {
+            const stillInSession = session.participants.some(p => p.id === currentParticipant.id);
+            if (!stillInSession) {
+                // Participant was removed by host
+                stopSync();
+                currentSession = null;
+                currentParticipant = null;
+                showToast('You have been removed from the session', 'warning', 4000);
+                showPage('landing');
+                return;
+            }
+            
+            // Update current participant's data (tip changes from server)
+            const updatedParticipant = session.participants.find(p => p.id === currentParticipant.id);
+            if (updatedParticipant) {
+                currentParticipant = updatedParticipant;
+            }
+        }
+        
+        // Check if any data changed (items, participants, or assignments)
+        const oldDataJson = JSON.stringify({
+            items: currentSession.items,
+            participants: currentSession.participants
+        });
+        const newDataJson = JSON.stringify({
+            items: session.items,
+            participants: session.participants
+        });
+        
+        const hasChanges = oldDataJson !== newDataJson;
         currentSession = session;
         
         if (isHost) {
-            // Refresh host view
-            await loadParticipants();
-            if (session.items && session.items.length > 0) {
-                displayItems(session.items);
-                updateHostTotal();
-                await updateSummary(); // Auto-calculate
+            // Update host view
+            if (hasChanges) {
+                await loadParticipants();
+                if (session.items && session.items.length > 0) {
+                    displayItems(session.items, session.participants);
+                    updateHostTotal();
+                }
             }
-        } else {
-            // Refresh participant view
+            // Always update summary to reflect tip changes from participants
+            if (session.items && session.items.length > 0) {
+                await updateSummary();
+            }
+        } else if (hasChanges) {
+            // Refresh participant view only when data changes
             await loadParticipantView();
+        }
+    } catch (error) {
+        // Session may have been deleted or expired
+        if (error.message.includes('not found') || error.message.includes('404')) {
+            stopSync();
+            currentSession = null;
+            currentParticipant = null;
+            showToast('Session has ended', 'warning', 4000);
+            showPage('landing');
         }
     }
 }
@@ -131,7 +170,7 @@ async function fetchUserCurrency() {
             currency = await response.json();
         }
     } catch (error) {
-        console.warn('Failed to fetch currency, using default:', error);
+        // Use default currency
     }
 }
 
@@ -153,8 +192,55 @@ async function apiRequest(endpoint, options = {}) {
     return response.json();
 }
 
+// Toast Notifications
+function showToast(message, type = 'info', duration = 3000) {
+    const toast = document.getElementById('toast');
+    toast.textContent = message;
+    toast.className = 'toast ' + type;
+    
+    // Trigger reflow for animation
+    void toast.offsetWidth;
+    toast.classList.add('show');
+    
+    setTimeout(() => {
+        toast.classList.remove('show');
+    }, duration);
+}
+
 function showError(message) {
-    alert(message);
+    showToast(message, 'error', 4000);
+}
+
+function showSuccess(message) {
+    showToast(message, 'success', 3000);
+}
+
+// Confirmation Modal
+function showConfirm(title, message, onConfirm) {
+    const modal = document.getElementById('confirm-modal');
+    document.getElementById('confirm-title').textContent = title;
+    document.getElementById('confirm-message').textContent = message;
+    
+    const okBtn = document.getElementById('confirm-ok');
+    const cancelBtn = document.getElementById('confirm-cancel');
+    
+    const cleanup = () => {
+        modal.classList.remove('active');
+        okBtn.replaceWith(okBtn.cloneNode(true));
+        cancelBtn.replaceWith(cancelBtn.cloneNode(true));
+    };
+    
+    document.getElementById('confirm-ok').addEventListener('click', () => {
+        cleanup();
+        onConfirm();
+    });
+    
+    document.getElementById('confirm-cancel').addEventListener('click', cleanup);
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) cleanup();
+    });
+    
+    modal.classList.add('active');
 }
 
 function updateStepIndicator(step) {
@@ -178,7 +264,7 @@ async function createSession(hostName) {
         
         // Find the host participant
         currentParticipant = session.participants.find(p => p.is_host);
-        currentTipPercentage = currentParticipant?.tip_percentage || 20;
+        currentTipPercentage = currentParticipant?.tip_percentage || 10;
         
         await loadSession(session.code);
         
@@ -202,7 +288,7 @@ async function joinSession(code, name) {
         });
         
         currentParticipant = participant;
-        currentTipPercentage = participant.tip_percentage || 20;
+        currentTipPercentage = participant.tip_percentage || 10;
         isHost = false;
         
         document.getElementById('participant-session-code').textContent = code;
@@ -238,7 +324,6 @@ async function fetchNearbySessions() {
             panel.style.display = 'none';
         }
     } catch (error) {
-        console.warn('Failed to fetch nearby sessions:', error);
         document.getElementById('nearby-sessions-panel').style.display = 'none';
     }
 }
@@ -283,13 +368,13 @@ async function loadSession(code) {
         // Update host participant reference
         if (isHost && !currentParticipant) {
             currentParticipant = session.participants.find(p => p.is_host);
-            currentTipPercentage = currentParticipant?.tip_percentage || 20;
+            currentTipPercentage = currentParticipant?.tip_percentage || 10;
         }
         
         await loadParticipants();
         
         if (session.items && session.items.length > 0) {
-            displayItems(session.items);
+            displayItems(session.items, session.participants);
             document.getElementById('items-section').hidden = false;
             document.getElementById('items-count').textContent = session.items.filter(i => !i.is_tax && !i.is_tip_suggestion).length;
             updateStepIndicator(2);
@@ -319,21 +404,29 @@ async function loadParticipants() {
         `).join('');
         
     } catch (error) {
-        console.error('Failed to load participants:', error);
+        // Silently fail - will retry on next sync
     }
 }
 
 async function removeParticipant(participantId) {
-    if (!confirm('Remove this participant from the session?')) return;
+    // Find participant name for confirmation message
+    const participant = currentSession.participants.find(p => p.id === participantId);
+    const name = participant?.name || 'this participant';
     
-    try {
-        await apiRequest(`/sessions/${currentSession.code}/participants/${participantId}`, {
-            method: 'DELETE'
-        });
-        await loadSession(currentSession.code);
-    } catch (error) {
-        showError('Failed to remove participant: ' + error.message);
-    }
+    showConfirm(
+        'Remove Participant',
+        `Remove ${name} from the session? They will be returned to the home screen.`,
+        async () => {
+            try {
+                await apiRequest(`/sessions/${currentSession.code}/participants/${participantId}`, {
+                    method: 'DELETE'
+                });
+                await loadSession(currentSession.code);
+            } catch (error) {
+                showError('Failed to remove participant: ' + error.message);
+            }
+        }
+    );
 }
 
 // Receipt Upload
@@ -449,22 +542,43 @@ async function uploadReceipt() {
     }
 }
 
-function displayItems(items) {
+function displayItems(items, participants = []) {
     const list = document.getElementById('items-list');
     
     const regularItems = items.filter(i => !i.is_tax && !i.is_tip_suggestion);
     const taxItems = items.filter(i => i.is_tax);
     
-    // Combined view: selectable items with delete button
+    // Combined view: selectable items with delete button (host only)
     list.innerHTML = regularItems.map(item => {
         const myAssignment = item.assignments?.find(a => a.participant_id === currentParticipant?.id);
         const isSelected = myAssignment && myAssignment.share_count > 0;
         
+        // Get names of other people who selected this item
+        const selectors = [];
+        if (item.assignments) {
+            item.assignments.forEach(a => {
+                if (a.share_count > 0) {
+                    const participant = participants.find(p => p.id === a.participant_id);
+                    if (participant && participant.id !== currentParticipant?.id) {
+                        selectors.push(participant.name);
+                    }
+                }
+            });
+        }
+        
+        const totalShares = item.assignments?.reduce((sum, a) => sum + a.share_count, 0) || 0;
+        
         return `
             <div class="item-row ${isSelected ? 'selected' : ''}" data-id="${item.id}">
                 <div class="item-checkbox" onclick="toggleHostItemSelection('${item.id}')"></div>
-                <div class="item-details" onclick="toggleHostItemSelection('${item.id}')">
+                <div class="item-details" onclick="toggleHostItemSelection('${item.id}')" style="flex: 1;">
                     <span class="item-name">${item.name}</span>
+                    ${selectors.length > 0 ? `
+                        <div class="item-selectors">
+                            ${selectors.map(name => `<span class="selector-chip">${name}</span>`).join('')}
+                        </div>
+                    ` : ''}
+                    ${totalShares > 1 ? `<span class="item-quantity">Split ${totalShares} ways</span>` : ''}
                     ${item.quantity > 1 ? `<span class="item-quantity">× ${item.quantity}</span>` : ''}
                 </div>
                 <span class="item-price">${formatCurrency(item.price)}</span>
@@ -488,12 +602,6 @@ async function deleteItem(itemId) {
     } catch (error) {
         showError('Failed to delete item: ' + error.message);
     }
-}
-
-// Host Item Selection (now integrated with displayItems)
-function displayHostSelectableItems(items) {
-    // This function is now merged into displayItems
-    // Keeping it for backwards compatibility but it does nothing
 }
 
 async function toggleHostItemSelection(itemId) {
@@ -643,6 +751,31 @@ function setupCopyHandler() {
             textSpan.textContent = 'Copied!';
             setTimeout(() => textSpan.textContent = 'Copy Code', 1500);
         }
+    });
+}
+
+// End Session
+function setupEndSessionHandler() {
+    document.getElementById('end-session-btn').addEventListener('click', () => {
+        showConfirm(
+            'End Session',
+            'This will end the session for everyone. All participants will be returned to the home screen.',
+            async () => {
+                try {
+                    await apiRequest(`/sessions/${currentSession.code}`, {
+                        method: 'DELETE'
+                    });
+                    stopSync();
+                    currentSession = null;
+                    currentParticipant = null;
+                    isHost = false;
+                    showToast('Session ended', 'success');
+                    showPage('landing');
+                } catch (error) {
+                    showError('Failed to end session: ' + error.message);
+                }
+            }
+        );
     });
 }
 
@@ -804,7 +937,7 @@ async function updateTip(percentage) {
         updateHostTotal();
         
     } catch (error) {
-        console.error('Failed to update tip:', error);
+        // Still update local UI even if server update failed
         updateYourTotal();
         updateHostTotal();
     }
@@ -861,14 +994,16 @@ async function registerServiceWorker() {
                 newWorker.addEventListener('statechange', () => {
                     if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
                         // New content available, show refresh prompt
-                        if (confirm('New version available! Reload to update?')) {
-                            window.location.reload();
-                        }
+                        showConfirm(
+                            'Update Available',
+                            'A new version is available. Reload to update?',
+                            () => window.location.reload()
+                        );
                     }
                 });
             });
         } catch (error) {
-            console.warn('Service Worker registration failed:', error);
+            // Service worker not supported or blocked
         }
     }
 }
@@ -900,6 +1035,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setupUploadHandlers();
     setupQRHandlers();
     setupCopyHandler();
+    setupEndSessionHandler();
     setupTipHandlers();
     
     // Add item button
