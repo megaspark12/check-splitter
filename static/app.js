@@ -10,6 +10,7 @@ let currentSession = null;
 let currentParticipant = null;
 let isHost = false;
 let currentTipPercentage = 20;
+let syncInterval = null;
 let currency = { code: 'USD', symbol: '$', name: 'US Dollar' };
 
 // DOM Elements
@@ -23,6 +24,97 @@ const pages = {
 function showPage(pageName) {
     Object.values(pages).forEach(page => page.classList.remove('active'));
     pages[pageName].classList.add('active');
+    
+    // Manage sync based on page
+    if (pageName === 'landing') {
+        stopSync();
+    } else {
+        startSync();
+    }
+}
+
+function startSync() {
+    if (syncInterval) return; // Already syncing
+    
+    syncInterval = setInterval(async () => {
+        if (!currentSession) return;
+        
+        try {
+            await syncSession();
+        } catch (error) {
+            console.error('Sync error:', error);
+        }
+    }, 3000); // Sync every 3 seconds
+}
+
+function stopSync() {
+    if (syncInterval) {
+        clearInterval(syncInterval);
+        syncInterval = null;
+    }
+}
+
+async function syncSession() {
+    const session = await apiRequest(`/sessions/${currentSession.code}`);
+    
+    // Check if data changed (compare JSON)
+    const oldItemsJson = JSON.stringify(currentSession.items);
+    const newItemsJson = JSON.stringify(session.items);
+    const oldParticipantsJson = JSON.stringify(currentSession.participants);
+    const newParticipantsJson = JSON.stringify(session.participants);
+    
+    if (oldItemsJson !== newItemsJson || oldParticipantsJson !== newParticipantsJson) {
+        currentSession = session;
+        
+        if (isHost) {
+            // Refresh host view
+            await loadParticipants();
+            if (session.items && session.items.length > 0) {
+                displayItems(session.items);
+                updateHostTotal();
+                await updateSummary(); // Auto-calculate
+            }
+        } else {
+            // Refresh participant view
+            await loadParticipantView();
+        }
+    }
+}
+
+async function updateSummary() {
+    try {
+        const summary = await apiRequest(`/sessions/${currentSession.code}/summary`);
+        
+        const content = document.getElementById('summary-content');
+        
+        content.innerHTML = summary.participants.map(p => `
+            <div class="summary-row">
+                <div>
+                    <span class="name">${p.participant_name}</span>
+                    <div style="font-size: 0.75rem; color: var(--text-muted);">
+                        Items: ${formatCurrency(p.items_subtotal)} + Tax: ${formatCurrency(p.tax_share)} + Tip: ${formatCurrency(p.tip_amount)}
+                    </div>
+                </div>
+                <span class="amount">${formatCurrency(p.total)}</span>
+            </div>
+        `).join('');
+        
+        // Add unassigned items warning if any
+        if (summary.unassigned_total > 0) {
+            content.innerHTML += `
+                <div class="summary-row" style="border: 1px solid var(--accent);">
+                    <span class="name">⚠️ Unassigned Items</span>
+                    <span class="amount" style="color: var(--accent);">${formatCurrency(summary.unassigned_total)}</span>
+                </div>
+            `;
+        }
+        
+        document.getElementById('summary-section').hidden = false;
+        
+    } catch (error) {
+        // Summary not ready yet, hide section
+        document.getElementById('summary-section').hidden = true;
+    }
 }
 
 function formatCurrency(amount) {
@@ -200,9 +292,9 @@ async function loadSession(code) {
             displayItems(session.items);
             document.getElementById('items-section').hidden = false;
             document.getElementById('items-count').textContent = session.items.filter(i => !i.is_tax && !i.is_tip_suggestion).length;
-            document.getElementById('calculate-btn').hidden = false;
             updateStepIndicator(2);
             updateHostTotal();
+            await updateSummary(); // Auto-calculate summary
         }
         
     } catch (error) {
@@ -222,11 +314,25 @@ async function loadParticipants() {
             <div class="participant-chip ${p.is_host ? 'host' : ''}">
                 <div class="participant-avatar">${p.name.charAt(0).toUpperCase()}</div>
                 <span>${p.name}</span>
+                ${isHost && !p.is_host ? `<button class="participant-remove" onclick="event.stopPropagation(); removeParticipant('${p.id}')" title="Remove">✕</button>` : ''}
             </div>
         `).join('');
         
     } catch (error) {
         console.error('Failed to load participants:', error);
+    }
+}
+
+async function removeParticipant(participantId) {
+    if (!confirm('Remove this participant from the session?')) return;
+    
+    try {
+        await apiRequest(`/sessions/${currentSession.code}/participants/${participantId}`, {
+            method: 'DELETE'
+        });
+        await loadSession(currentSession.code);
+    } catch (error) {
+        showError('Failed to remove participant: ' + error.message);
     }
 }
 
@@ -742,43 +848,6 @@ function updateYourTotal() {
     document.getElementById('your-grand-total').textContent = formatCurrency(grandTotal);
 }
 
-// Summary Calculation (Host)
-async function calculateSummary() {
-    try {
-        const summary = await apiRequest(`/sessions/${currentSession.code}/summary`);
-        
-        const content = document.getElementById('summary-content');
-        
-        content.innerHTML = summary.participants.map(p => `
-            <div class="summary-row">
-                <div>
-                    <span class="name">${p.participant_name}</span>
-                    <div style="font-size: 0.75rem; color: var(--text-muted);">
-                        Items: ${formatCurrency(p.items_subtotal)} + Tax: ${formatCurrency(p.tax_share)} + Tip: ${formatCurrency(p.tip_amount)}
-                    </div>
-                </div>
-                <span class="amount">${formatCurrency(p.total)}</span>
-            </div>
-        `).join('');
-        
-        // Add unassigned items warning if any
-        if (summary.unassigned_total > 0) {
-            content.innerHTML += `
-                <div class="summary-row" style="border: 1px solid var(--accent);">
-                    <span class="name">⚠️ Unassigned Items</span>
-                    <span class="amount" style="color: var(--accent);">${formatCurrency(summary.unassigned_total)}</span>
-                </div>
-            `;
-        }
-        
-        document.getElementById('summary-section').hidden = false;
-        updateStepIndicator(3);
-        
-    } catch (error) {
-        showError('Failed to calculate summary: ' + error.message);
-    }
-}
-
 // Initialize
 // Register Service Worker for PWA
 async function registerServiceWorker() {
@@ -835,9 +904,6 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Add item button
     document.getElementById('add-item-btn').addEventListener('click', addItem);
-    
-    // Calculate button
-    document.getElementById('calculate-btn').addEventListener('click', calculateSummary);
     
     // Refresh button (participant)
     document.getElementById('refresh-btn').addEventListener('click', loadParticipantView);
