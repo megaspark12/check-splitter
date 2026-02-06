@@ -17,7 +17,7 @@ from app.config import get_settings
 
 
 class SessionService:
-    """Service for managing receipt splitting sessions."""
+    """Service for managing check splitting sessions."""
     
     def __init__(self, db: AsyncSession):
         self.db = db

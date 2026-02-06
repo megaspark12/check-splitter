@@ -1,9 +1,9 @@
 /**
- * Service Worker for Receipt Splitter PWA
+ * Service Worker for Check Splitter PWA
  * Handles caching and offline functionality
  */
 
-const CACHE_NAME = 'receipt-splitter-v1';
+const CACHE_NAME = 'check-splitter-v1';
 const STATIC_ASSETS = [
   '/',
   '/static/index.html',

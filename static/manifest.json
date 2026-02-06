@@ -1,6 +1,6 @@
 {
-  "name": "Receipt Splitter",
-  "short_name": "Receipt Split",
+  "name": "Check Splitter",
+  "short_name": "Check Split",
   "description": "Split bills fairly with friends in seconds",
   "start_url": "/",
   "scope": "/",

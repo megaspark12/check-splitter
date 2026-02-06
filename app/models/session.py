@@ -1,4 +1,4 @@
-"""Session model for receipt splitting sessions."""
+"""Session model for check splitting sessions."""
 import uuid
 from datetime import datetime
 from enum import Enum as PyEnum
@@ -17,7 +17,7 @@ class SessionStatus(str, PyEnum):
 
 
 class Session(Base):
-    """A receipt splitting session."""
+    """A check splitting session."""
     
     __tablename__ = "sessions"
     

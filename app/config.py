@@ -6,12 +6,12 @@ from functools import lru_cache
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
     
-    app_name: str = "Receipt Splitter"
+    app_name: str = "Check Splitter"
     debug: bool = True
     secret_key: str = "dev-secret-key-change-in-production"
     
     # Database
-    database_url: str = "sqlite+aiosqlite:///./receipt_splitter.db"
+    database_url: str = "sqlite+aiosqlite:///./check_splitter.db"
     
     # AI Vision (Gemini)
     gemini_api_key: str = ""

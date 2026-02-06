@@ -8,7 +8,7 @@ from app.database import Base
 
 
 class Participant(Base):
-    """A participant in a receipt splitting session."""
+    """A participant in a check splitting session."""
     
     __tablename__ = "participants"
     

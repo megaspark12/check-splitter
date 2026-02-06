@@ -1,4 +1,4 @@
-# Receipt Splitter
+# Check Splitter
 
 A web application for splitting restaurant bills among friends. Upload a receipt photo, and the AI will extract items automatically. Each person can select what they ordered, and the app calculates everyone's share including tax and tip.
 

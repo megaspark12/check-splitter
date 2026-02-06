@@ -1,5 +1,5 @@
 /**
- * Receipt Splitter - Frontend Application
+ * Check Splitter - Frontend Application
  * Enhanced UI with per-person tip calculation
  */
 
