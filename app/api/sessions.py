@@ -4,8 +4,11 @@ Sessions API routes.
 Handles session creation, retrieval, QR codes, and summaries.
 """
 import os
+import re
 import uuid
 import hashlib
+import aiofiles
+from pathlib import Path
 from datetime import datetime
 from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile, File, Request
@@ -13,6 +16,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.config import get_settings
+from app.logging_config import get_logger
 from app.schemas.session import SessionCreate, SessionResponse, SessionSummary, ParticipantSummary, NearbySession, NearbySessionsResponse
 from app.services.session_service import SessionService
 from app.services.qr_service import QRService
@@ -22,6 +27,7 @@ from app.models.item import Item
 from app.models.session import Session, SessionStatus
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
+logger = get_logger("api.sessions")
 
 
 def get_client_network_hash(request: Request) -> str:
@@ -136,6 +142,7 @@ async def upload_receipt(
     3. Parse the text into items
     4. Add the items to the session
     """
+    settings = get_settings()
     service = SessionService(db)
     session = await service.get_session_by_code(code)
     
@@ -150,22 +157,57 @@ async def upload_receipt(
             detail=f"File type {file.content_type} not allowed. Use JPEG, PNG, or WebP."
         )
     
-    # Read file content
-    image_bytes = await file.read()
+    # Check file size before reading (if available from headers)
+    if file.size and file.size > settings.max_upload_size_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Maximum size is {settings.max_upload_size_mb}MB."
+        )
     
-    # Save the image
-    uploads_dir = "uploads"
-    os.makedirs(uploads_dir, exist_ok=True)
+    # Read file content with size limit
+    max_size = settings.max_upload_size_bytes
+    chunks = []
+    total_size = 0
     
-    file_ext = file.filename.split(".")[-1] if file.filename else "jpg"
-    filename = f"{session.id}_{uuid.uuid4().hex[:8]}.{file_ext}"
-    filepath = os.path.join(uploads_dir, filename)
+    while True:
+        chunk = await file.read(8192)  # Read in 8KB chunks
+        if not chunk:
+            break
+        total_size += len(chunk)
+        if total_size > max_size:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File too large. Maximum size is {settings.max_upload_size_mb}MB."
+            )
+        chunks.append(chunk)
     
-    with open(filepath, "wb") as f:
-        f.write(image_bytes)
+    image_bytes = b"".join(chunks)
+    logger.info(f"Processing receipt upload for session {code}", extra={"file_size": total_size})
+    
+    # Prepare uploads directory using config
+    uploads_dir = Path(settings.uploads_dir)
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Sanitize file extension (prevent path traversal)
+    if file.filename:
+        # Extract only the extension, sanitize it
+        raw_ext = Path(file.filename).suffix.lower()
+        # Only allow known safe extensions
+        safe_extensions = {".jpg", ".jpeg", ".png", ".webp"}
+        file_ext = raw_ext if raw_ext in safe_extensions else ".jpg"
+    else:
+        file_ext = ".jpg"
+    
+    # Generate safe filename (no user input in path)
+    filename = f"{session.id}_{uuid.uuid4().hex[:8]}{file_ext}"
+    filepath = uploads_dir / filename
+    
+    # Write file asynchronously
+    async with aiofiles.open(filepath, "wb") as f:
+        await f.write(image_bytes)
     
     # Update session with image path
-    session.receipt_image_path = filepath
+    session.receipt_image_path = str(filepath)
     session.status = SessionStatus.PROCESSING
     await db.commit()
     

@@ -1,0 +1,79 @@
+# ============================================
+# Check Splitter - Docker Compose
+# ============================================
+# Development and production configurations
+
+version: '3.8'
+
+services:
+  # ============================================
+  # Application
+  # ============================================
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: check-splitter
+    ports:
+      - "${PORT:-8000}:8000"
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - DEBUG=${DEBUG:-false}
+      - SECRET_KEY=${SECRET_KEY:?SECRET_KEY is required}
+      - DATABASE_URL=${DATABASE_URL:-sqlite+aiosqlite:///./data/check_splitter.db}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:?GEMINI_API_KEY is required}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash-preview-05-20}
+      - CORS_ORIGINS=${CORS_ORIGINS:-*}
+      - RATE_LIMIT_PER_MINUTE=${RATE_LIMIT_PER_MINUTE:-60}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_FORMAT=${LOG_FORMAT:-json}
+      - WORKERS=${WORKERS:-2}
+    volumes:
+      - app-uploads:/app/uploads
+      - app-data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - check-splitter-network
+
+  # ============================================
+  # PostgreSQL (optional, for production)
+  # ============================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: check-splitter-db
+    profiles:
+      - postgres
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-checksplitter}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      - POSTGRES_DB=${POSTGRES_DB:-checksplitter}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-checksplitter}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - check-splitter-network
+
+volumes:
+  app-uploads:
+    driver: local
+  app-data:
+    driver: local
+  postgres-data:
+    driver: local
+
+networks:
+  check-splitter-network:
+    driver: bridge
