@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     # Server
     host: str = "0.0.0.0"
     port: int = 8000
+    metrics_port: int = 9090  # Internal metrics port
     workers: int = 1
     
     # CORS - comma-separated list of allowed origins

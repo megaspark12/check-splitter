@@ -17,6 +17,9 @@ services:
     container_name: check-splitter
     ports:
       - "${PORT:-8000}:8000"
+      # Metrics port is NOT exposed externally - only accessible within docker network
+      # To access metrics from host during development, uncomment:
+      # - "127.0.0.1:9090:9090"
     environment:
       - ENVIRONMENT=${ENVIRONMENT:-development}
       - DEBUG=${DEBUG:-false}
@@ -29,6 +32,7 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - LOG_FORMAT=${LOG_FORMAT:-json}
       - WORKERS=${WORKERS:-2}
+      - METRICS_PORT=${METRICS_PORT:-9090}
     volumes:
       - app-uploads:/app/uploads
       - app-data:/app/data

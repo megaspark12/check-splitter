@@ -176,9 +176,20 @@ async def health_check():
     }
 
 
-@app.get("/metrics")
-async def metrics():
-    """Basic metrics endpoint for monitoring."""
+# ====== Internal Metrics Server (separate port) ======
+
+metrics_app = FastAPI(
+    title=f"{settings.app_name} Metrics",
+    description="Internal metrics endpoint",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
+
+
+@metrics_app.get("/metrics")
+async def get_metrics():
+    """Basic metrics endpoint for monitoring (internal port only)."""
     import psutil
     import os
     
@@ -191,3 +202,9 @@ async def metrics():
         "cpu_percent": process.cpu_percent(),
         "threads": process.num_threads(),
     }
+
+
+@metrics_app.get("/health")
+async def metrics_health():
+    """Health check for metrics server."""
+    return {"status": "ok"}

@@ -48,6 +48,7 @@ COPY --chown=appuser:appuser app/ ./app/
 COPY --chown=appuser:appuser static/ ./static/
 COPY --chown=appuser:appuser alembic/ ./alembic/
 COPY --chown=appuser:appuser alembic.ini ./
+COPY --chown=appuser:appuser run.py ./
 
 # Create directories for uploads and data
 RUN mkdir -p /app/uploads /app/data && \
@@ -60,14 +61,16 @@ USER appuser
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app \
-    PORT=8000
+    PORT=8000 \
+    METRICS_PORT=9090
 
-# Expose port
+# Expose ports (main app and internal metrics)
 EXPOSE 8000
+EXPOSE 9090
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:${PORT}/health || exit 1
 
-# Run with Gunicorn for production
-CMD ["sh", "-c", "gunicorn app.main:app -w ${WORKERS:-2} -k uvicorn.workers.UvicornWorker -b 0.0.0.0:${PORT:-8000} --access-logfile - --error-logfile -"]
+# Run with the dual-server script
+CMD ["python", "run.py"]
