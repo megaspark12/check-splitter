@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime
 from enum import Enum as PyEnum
-from sqlalchemy import Column, String, DateTime, Text, Enum
+from sqlalchemy import Column, String, DateTime, Text, Enum, Index
 from sqlalchemy.dialects.sqlite import CHAR
 from sqlalchemy.orm import relationship
 from app.database import Base
@@ -30,6 +30,7 @@ class Session(Base):
         default=SessionStatus.PENDING,
         nullable=False
     )
+    network_hash = Column(String(64), nullable=True, index=True)  # For nearby session detection
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     expires_at = Column(DateTime, nullable=False)
     

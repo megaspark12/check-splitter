@@ -56,6 +56,12 @@ static_dir = Path(__file__).parent.parent / "static"
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 
+@app.get("/manifest.json")
+async def manifest():
+    """Serve manifest.json from root for PWA compatibility."""
+    return FileResponse(str(static_dir / "manifest.json"), media_type="application/manifest+json")
+
+
 @app.get("/")
 async def root():
     """Serve the main frontend page."""

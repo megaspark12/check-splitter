@@ -2,8 +2,18 @@
 <html lang="en" dir="auto">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#6366f1">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Receipt Split">
+    <meta name="description" content="Split bills fairly with friends in seconds">
     <title>Receipt Splitter</title>
+    <link rel="manifest" href="/manifest.json">
+    <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+    <link rel="apple-touch-icon" sizes="192x192" href="/static/icons/icon-192.png">
+    <link rel="apple-touch-icon" sizes="512x512" href="/static/icons/icon-512.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="/static/icons/icon-192.png">
     <link rel="stylesheet" href="/static/styles.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -51,6 +61,37 @@
                             Join Session
                         </button>
                     </form>
+                </div>
+                
+                <!-- Nearby Sessions Panel -->
+                <div id="nearby-sessions-panel" class="card card-nearby" style="display: none;">
+                    <div class="nearby-header">
+                        <h2>📡 Nearby Sessions</h2>
+                        <button id="refresh-nearby-btn" class="btn btn-small btn-ghost">🔄</button>
+                    </div>
+                    <p class="card-desc">Sessions on your network - tap to join!</p>
+                    <div id="nearby-sessions-list" class="nearby-list">
+                        <!-- Dynamically populated -->
+                    </div>
+                </div>
+                
+                <!-- Quick Join Modal -->
+                <div id="quick-join-modal" class="modal">
+                    <div class="modal-content">
+                        <button class="close-btn" onclick="closeQuickJoinModal()">&times;</button>
+                        <h3>Join Session</h3>
+                        <p id="quick-join-host-name" class="modal-subtitle"></p>
+                        <form id="quick-join-form">
+                            <input type="hidden" id="quick-join-code">
+                            <div class="input-group">
+                                <input type="text" id="quick-join-name" placeholder="Your name" required>
+                            </div>
+                            <button type="submit" class="btn btn-primary btn-large">
+                                <span class="btn-icon">🔗</span>
+                                Join Now
+                            </button>
+                        </form>
+                    </div>
                 </div>
             </div>
         </div>
@@ -139,13 +180,17 @@
                 </div>
             </div>
 
-            <!-- Items Section -->
+            <!-- Items Section (combined: view, edit, and select items) -->
             <div id="items-section" class="card" hidden>
                 <div class="card-header">
-                    <h2>🍽️ Items Found</h2>
+                    <h2>🍽️ Items</h2>
                     <span id="items-count" class="badge">0</span>
                 </div>
-                <div id="items-list" class="items-grid"></div>
+                <div class="instructions-banner">
+                    <span class="instructions-icon">💡</span>
+                    <p>Tap items to select what you ordered • Tap ✕ to delete</p>
+                </div>
+                <div id="items-list" class="items-grid selectable"></div>
                 
                 <div class="add-item-section">
                     <h4>Add Item Manually</h4>
@@ -155,18 +200,6 @@
                         <button id="add-item-btn" class="btn btn-small btn-secondary">Add</button>
                     </div>
                 </div>
-            </div>
-
-            <!-- Host's Own Item Selection -->
-            <div id="host-selection-section" class="card" hidden>
-                <div class="card-header">
-                    <h2>👆 Select Your Items</h2>
-                </div>
-                <div class="instructions-banner">
-                    <span class="instructions-icon">💡</span>
-                    <p>Tap the items you ordered</p>
-                </div>
-                <div id="host-items-list" class="items-grid selectable"></div>
                 
                 <!-- Host Tip Selection -->
                 <div class="tip-section-host">

@@ -5,30 +5,89 @@ Handles session creation, retrieval, QR codes, and summaries.
 """
 import os
 import uuid
+import hashlib
+from datetime import datetime
 from decimal import Decimal
-from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile, File, Request
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.schemas.session import SessionCreate, SessionResponse, SessionSummary, ParticipantSummary
+from app.schemas.session import SessionCreate, SessionResponse, SessionSummary, ParticipantSummary, NearbySession, NearbySessionsResponse
 from app.services.session_service import SessionService
 from app.services.qr_service import QRService
 from app.services.calculator import BillCalculator
 from app.services.ocr_service import OCRService
 from app.models.item import Item
-from app.models.session import SessionStatus
+from app.models.session import Session, SessionStatus
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
+
+
+def get_client_network_hash(request: Request) -> str:
+    """Generate a hash of the client's network identifier."""
+    # Get client IP, handling proxies
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        client_ip = forwarded.split(",")[0].strip()
+    else:
+        client_ip = request.client.host if request.client else "unknown"
+    
+    # Hash the IP to create a network identifier
+    # This groups all clients on the same network together
+    return hashlib.sha256(client_ip.encode()).hexdigest()[:16]
+
+
+@router.get("/nearby", response_model=NearbySessionsResponse)
+async def get_nearby_sessions(
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get sessions on the same network (nearby).
+    This uses the client's IP address to find sessions created from the same network.
+    """
+    network_hash = get_client_network_hash(request)
+    
+    # Find active sessions on the same network with eager loading of participants
+    from sqlalchemy.orm import selectinload
+    result = await db.execute(
+        select(Session)
+        .options(selectinload(Session.participants))
+        .where(Session.network_hash == network_hash)
+        .where(Session.expires_at > datetime.utcnow())
+        .where(Session.status != SessionStatus.COMPLETED)
+        .order_by(Session.created_at.desc())
+    )
+    sessions = result.scalars().all()
+    
+    nearby_sessions = []
+    for session in sessions:
+        # Find the host
+        host = next((p for p in session.participants if p.is_host), None)
+        host_name = host.name if host else "Unknown"
+        
+        nearby_sessions.append(NearbySession(
+            code=session.code,
+            host_name=host_name,
+            participant_count=len(session.participants),
+            status=session.status,
+            created_at=session.created_at
+        ))
+    
+    return NearbySessionsResponse(sessions=nearby_sessions)
 
 
 @router.post("", status_code=201, response_model=SessionResponse)
 async def create_session(
     session_data: SessionCreate,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """Create a new session and add the host as the first participant."""
+    network_hash = get_client_network_hash(request)
     service = SessionService(db)
-    session = await service.create_session(session_data.host_name)
+    session = await service.create_session(session_data.host_name, network_hash=network_hash)
     return session
 
 
@@ -187,6 +246,7 @@ async def upload_receipt(
 @router.get("/{code}/qr")
 async def get_session_qr(
     code: str,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """Get a QR code image for the session."""
@@ -196,7 +256,14 @@ async def get_session_qr(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     
-    qr_service = QRService()
+    # Build base URL from request headers (handles proxies like Cloudflare)
+    # Check for forwarded headers first (set by reverse proxies)
+    forwarded_proto = request.headers.get("X-Forwarded-Proto", request.url.scheme)
+    forwarded_host = request.headers.get("X-Forwarded-Host", request.headers.get("Host", request.url.netloc))
+    
+    base_url = f"{forwarded_proto}://{forwarded_host}"
+    
+    qr_service = QRService(base_url=base_url)
     qr_image = qr_service.generate_session_qr(session.code)
     
     return Response(content=qr_image, media_type="image/png")

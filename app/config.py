@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     
     # AI Vision (Gemini)
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.0-flash"  # Free tier model
+    gemini_model: str = "gemini-2.5-flash-preview-05-20"  # Latest vision model
     
     # Session
     session_expiry_hours: int = 24

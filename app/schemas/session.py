@@ -82,3 +82,20 @@ class SessionSummary(BaseModel):
     calculated_total: Decimal
     participants: List[ParticipantSummary]
     unassigned_items: List[dict]
+
+
+class NearbySession(BaseModel):
+    """Schema for a nearby session."""
+    code: str
+    host_name: str
+    participant_count: int
+    status: SessionStatus
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+
+class NearbySessionsResponse(BaseModel):
+    """Schema for nearby sessions response."""
+    sessions: List[NearbySession]

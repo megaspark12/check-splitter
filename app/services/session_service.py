@@ -43,12 +43,13 @@ class SessionService:
                 return code
         raise RuntimeError("Could not generate unique session code")
     
-    async def create_session(self, host_name: str) -> Session:
+    async def create_session(self, host_name: str, network_hash: str = None) -> Session:
         """
         Create a new session with the host as the first participant.
         
         Args:
             host_name: Name of the session host
+            network_hash: Hash of the client's network for nearby detection
             
         Returns:
             The created Session object
@@ -62,6 +63,7 @@ class SessionService:
         session = Session(
             code=code,
             status=SessionStatus.PENDING,
+            network_hash=network_hash,
             expires_at=expires_at,
         )
         

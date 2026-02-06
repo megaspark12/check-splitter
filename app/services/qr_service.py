@@ -24,7 +24,8 @@ class QRService:
         Returns:
             PNG image bytes
         """
-        url = f"{self.base_url}/join/{session_code}"
+        # Link to main page with code as query param for easy joining
+        url = f"{self.base_url}/?code={session_code}"
         
         qr = qrcode.QRCode(
             version=1,

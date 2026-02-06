@@ -37,7 +37,6 @@ async function fetchUserCurrency() {
         const response = await fetch(`${API_BASE}/currency?timezone=${encodeURIComponent(timezone)}`);
         if (response.ok) {
             currency = await response.json();
-            console.log('Detected currency:', currency);
         }
     } catch (error) {
         console.warn('Failed to fetch currency, using default:', error);
@@ -125,6 +124,65 @@ async function joinSession(code, name) {
     }
 }
 
+// Nearby Sessions (like Spotify Jam)
+async function fetchNearbySessions() {
+    try {
+        const response = await apiRequest('/sessions/nearby');
+        const panel = document.getElementById('nearby-sessions-panel');
+        const list = document.getElementById('nearby-sessions-list');
+        
+        if (response.sessions && response.sessions.length > 0) {
+            panel.style.display = 'block';
+            list.innerHTML = response.sessions.map(session => `
+                <div class="nearby-session-item" onclick="openQuickJoinModal('${session.code}', '${session.host_name}')">
+                    <div class="nearby-session-info">
+                        <span class="nearby-host">🧑‍🍳 ${session.host_name}'s Session</span>
+                        <span class="nearby-meta">${session.participant_count} participant${session.participant_count !== 1 ? 's' : ''} • ${getTimeAgo(session.created_at)}</span>
+                    </div>
+                    <span class="nearby-join-arrow">→</span>
+                </div>
+            `).join('');
+        } else {
+            panel.style.display = 'none';
+        }
+    } catch (error) {
+        console.warn('Failed to fetch nearby sessions:', error);
+        document.getElementById('nearby-sessions-panel').style.display = 'none';
+    }
+}
+
+function getTimeAgo(dateString) {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffMins = Math.floor(diffMs / 60000);
+    
+    if (diffMins < 1) return 'just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    const diffHours = Math.floor(diffMins / 60);
+    if (diffHours < 24) return `${diffHours}h ago`;
+    return `${Math.floor(diffHours / 24)}d ago`;
+}
+
+function openQuickJoinModal(code, hostName) {
+    document.getElementById('quick-join-code').value = code;
+    document.getElementById('quick-join-host-name').textContent = `Join ${hostName}'s session`;
+    document.getElementById('quick-join-name').value = '';
+    document.getElementById('quick-join-modal').classList.add('active');
+    document.getElementById('quick-join-name').focus();
+}
+
+function closeQuickJoinModal() {
+    document.getElementById('quick-join-modal').classList.remove('active');
+}
+
+function quickJoinNearby(code) {
+    // Pre-fill the session code and scroll to join form
+    document.getElementById('session-code').value = code;
+    document.getElementById('join-name').focus();
+    document.getElementById('join-name').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
 async function loadSession(code) {
     try {
         const session = await apiRequest(`/sessions/${code}`);
@@ -140,9 +198,7 @@ async function loadSession(code) {
         
         if (session.items && session.items.length > 0) {
             displayItems(session.items);
-            displayHostSelectableItems(session.items);
             document.getElementById('items-section').hidden = false;
-            document.getElementById('host-selection-section').hidden = false;
             document.getElementById('items-count').textContent = session.items.filter(i => !i.is_tax && !i.is_tip_suggestion).length;
             document.getElementById('calculate-btn').hidden = false;
             updateStepIndicator(2);
@@ -277,9 +333,7 @@ async function uploadReceipt() {
         status.hidden = true;
         
         const cardHeader = document.getElementById('upload-section').querySelector('.card-header h2');
-        cardHeader.textContent = '✅ Receipt Processed';
-        
-        alert(`Found ${result.items_found} items on the receipt!`);
+        cardHeader.textContent = `✅ Found ${result.items_found} items`;
         
     } catch (error) {
         status.hidden = true;
@@ -295,17 +349,24 @@ function displayItems(items) {
     const regularItems = items.filter(i => !i.is_tax && !i.is_tip_suggestion);
     const taxItems = items.filter(i => i.is_tax);
     
-    list.innerHTML = regularItems.map(item => `
-        <div class="item-row" data-id="${item.id}">
-            <div class="item-details">
-                <span class="item-name">${item.name}</span>
-                ${item.quantity > 1 ? `<span class="item-quantity">× ${item.quantity}</span>` : ''}
+    // Combined view: selectable items with delete button
+    list.innerHTML = regularItems.map(item => {
+        const myAssignment = item.assignments?.find(a => a.participant_id === currentParticipant?.id);
+        const isSelected = myAssignment && myAssignment.share_count > 0;
+        
+        return `
+            <div class="item-row ${isSelected ? 'selected' : ''}" data-id="${item.id}">
+                <div class="item-checkbox" onclick="toggleHostItemSelection('${item.id}')"></div>
+                <div class="item-details" onclick="toggleHostItemSelection('${item.id}')">
+                    <span class="item-name">${item.name}</span>
+                    ${item.quantity > 1 ? `<span class="item-quantity">× ${item.quantity}</span>` : ''}
+                </div>
+                <span class="item-price">${formatCurrency(item.price)}</span>
+                <button class="item-delete" onclick="event.stopPropagation(); deleteItem('${item.id}')" title="Remove">✕</button>
             </div>
-            <span class="item-price">${formatCurrency(item.price)}</span>
-            <button class="item-delete" onclick="deleteItem('${item.id}')" title="Remove">✕</button>
-        </div>
-    `).join('') + taxItems.map(item => `
-        <div class="item-row" data-id="${item.id}" style="background: rgba(245, 158, 11, 0.1);">
+        `;
+    }).join('') + taxItems.map(item => `
+        <div class="item-row tax-item" data-id="${item.id}">
             <span class="item-name">🏷️ ${item.name}</span>
             <span class="item-price">${formatCurrency(item.price)}</span>
         </div>
@@ -323,28 +384,10 @@ async function deleteItem(itemId) {
     }
 }
 
-// Host Item Selection
+// Host Item Selection (now integrated with displayItems)
 function displayHostSelectableItems(items) {
-    const list = document.getElementById('host-items-list');
-    const selectableItems = items.filter(i => !i.is_tax && !i.is_tip_suggestion);
-    
-    list.innerHTML = selectableItems.map(item => {
-        const myAssignment = item.assignments?.find(a => a.participant_id === currentParticipant?.id);
-        const isSelected = myAssignment && myAssignment.share_count > 0;
-        
-        return `
-            <div class="item-row ${isSelected ? 'selected' : ''}" 
-                 data-id="${item.id}"
-                 onclick="toggleHostItemSelection('${item.id}')">
-                <div class="item-checkbox"></div>
-                <div class="item-details">
-                    <span class="item-name">${item.name}</span>
-                    ${item.quantity > 1 ? `<span class="item-quantity">× ${item.quantity}</span>` : ''}
-                </div>
-                <span class="item-price">${formatCurrency(item.price)}</span>
-            </div>
-        `;
-    }).join('');
+    // This function is now merged into displayItems
+    // Keeping it for backwards compatibility but it does nothing
 }
 
 async function toggleHostItemSelection(itemId) {
@@ -737,7 +780,34 @@ async function calculateSummary() {
 }
 
 // Initialize
+// Register Service Worker for PWA
+async function registerServiceWorker() {
+    if ('serviceWorker' in navigator) {
+        try {
+            const registration = await navigator.serviceWorker.register('/static/sw.js');
+            
+            // Check for updates
+            registration.addEventListener('updatefound', () => {
+                const newWorker = registration.installing;
+                newWorker.addEventListener('statechange', () => {
+                    if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                        // New content available, show refresh prompt
+                        if (confirm('New version available! Reload to update?')) {
+                            window.location.reload();
+                        }
+                    }
+                });
+            });
+        } catch (error) {
+            console.warn('Service Worker registration failed:', error);
+        }
+    }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
+    // Register service worker
+    registerServiceWorker();
+    
     // Create session form
     document.getElementById('create-session-form').addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -772,6 +842,49 @@ document.addEventListener('DOMContentLoaded', () => {
     // Refresh button (participant)
     document.getElementById('refresh-btn').addEventListener('click', loadParticipantView);
     
+    // Refresh nearby sessions button
+    const refreshNearbyBtn = document.getElementById('refresh-nearby-btn');
+    if (refreshNearbyBtn) {
+        refreshNearbyBtn.addEventListener('click', fetchNearbySessions);
+    }
+    
+    // Quick join form (nearby sessions modal)
+    const quickJoinForm = document.getElementById('quick-join-form');
+    if (quickJoinForm) {
+        quickJoinForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const code = document.getElementById('quick-join-code').value.trim().toUpperCase();
+            const name = document.getElementById('quick-join-name').value.trim();
+            if (code && name) {
+                closeQuickJoinModal();
+                await joinSession(code, name);
+            }
+        });
+    }
+    
+    // Close quick join modal when clicking outside
+    const quickJoinModal = document.getElementById('quick-join-modal');
+    if (quickJoinModal) {
+        quickJoinModal.addEventListener('click', (e) => {
+            if (e.target === quickJoinModal) {
+                closeQuickJoinModal();
+            }
+        });
+    }
+    
     // Fetch user's currency based on location
     fetchUserCurrency();
+    
+    // Fetch nearby sessions on page load
+    fetchNearbySessions();
+    
+    // Check for session code in URL (from QR code scan)
+    const urlParams = new URLSearchParams(window.location.search);
+    const codeFromUrl = urlParams.get('code');
+    if (codeFromUrl) {
+        document.getElementById('session-code').value = codeFromUrl.toUpperCase();
+        document.getElementById('join-name').focus();
+        // Scroll to join form
+        document.querySelector('.card-secondary')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
 });
