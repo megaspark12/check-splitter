@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>404 - Page Not Found | Check Splitter</title>
+    <link rel="icon" type="image/png" href="/static/icons/icon-192.png">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #6366f1;
+            --primary-dark: #4f46e5;
+            --bg-primary: #0f172a;
+            --bg-secondary: #1e293b;
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --border: #334155;
+        }
+        
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            overflow: hidden;
+        }
+        
+        .container {
+            text-align: center;
+            max-width: 500px;
+        }
+        
+        /* Receipt styling */
+        .receipt {
+            background: #fefefe;
+            color: #1a1a1a;
+            padding: 30px 25px;
+            border-radius: 4px;
+            margin-bottom: 30px;
+            position: relative;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+            transform: rotate(-2deg);
+            animation: float 3s ease-in-out infinite;
+        }
+        
+        .receipt::before,
+        .receipt::after {
+            content: '';
+            position: absolute;
+            left: 0;
+            right: 0;
+            height: 20px;
+            background: linear-gradient(135deg, transparent 33.33%, #fefefe 33.33%, #fefefe 66.67%, transparent 66.67%),
+                        linear-gradient(-135deg, transparent 33.33%, #fefefe 33.33%, #fefefe 66.67%, transparent 66.67%);
+            background-size: 20px 40px;
+        }
+        
+        .receipt::before {
+            top: -10px;
+            transform: rotate(180deg);
+        }
+        
+        .receipt::after {
+            bottom: -10px;
+        }
+        
+        .receipt-header {
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
+            font-size: 18px;
+            letter-spacing: 2px;
+            margin-bottom: 15px;
+            padding-bottom: 15px;
+            border-bottom: 2px dashed #ccc;
+        }
+        
+        .receipt-body {
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            line-height: 1.8;
+        }
+        
+        .receipt-line {
+            display: flex;
+            justify-content: space-between;
+            padding: 3px 0;
+        }
+        
+        .receipt-total {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 2px dashed #ccc;
+            font-weight: bold;
+            font-size: 16px;
+        }
+        
+        .error-code {
+            font-size: 48px;
+            font-weight: bold;
+            color: var(--primary);
+            margin-bottom: 10px;
+            text-shadow: 0 0 30px rgba(99, 102, 241, 0.5);
+        }
+        
+        .error-code span {
+            display: inline-block;
+            animation: bounce 0.6s ease-in-out infinite;
+        }
+        
+        .error-code span:nth-child(2) {
+            animation-delay: 0.1s;
+        }
+        
+        .error-code span:nth-child(3) {
+            animation-delay: 0.2s;
+        }
+        
+        h1 {
+            font-size: 24px;
+            margin-bottom: 15px;
+            color: var(--text-primary);
+        }
+        
+        p {
+            color: var(--text-secondary);
+            margin-bottom: 25px;
+            line-height: 1.6;
+        }
+        
+        .home-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: var(--primary);
+            color: white;
+            padding: 14px 28px;
+            border-radius: 12px;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 16px;
+            transition: all 0.2s ease;
+            box-shadow: 0 4px 15px rgba(99, 102, 241, 0.3);
+        }
+        
+        .home-btn:hover {
+            background: var(--primary-dark);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(99, 102, 241, 0.4);
+        }
+        
+        .home-btn svg {
+            width: 20px;
+            height: 20px;
+        }
+        
+        /* Floating animation */
+        @keyframes float {
+            0%, 100% {
+                transform: rotate(-2deg) translateY(0);
+            }
+            50% {
+                transform: rotate(-2deg) translateY(-10px);
+            }
+        }
+        
+        @keyframes bounce {
+            0%, 100% {
+                transform: translateY(0);
+            }
+            50% {
+                transform: translateY(-5px);
+            }
+        }
+        
+        /* Background decoration */
+        .bg-decoration {
+            position: fixed;
+            width: 300px;
+            height: 300px;
+            border-radius: 50%;
+            filter: blur(100px);
+            opacity: 0.3;
+            pointer-events: none;
+        }
+        
+        .bg-decoration.purple {
+            background: var(--primary);
+            top: -100px;
+            left: -100px;
+        }
+        
+        .bg-decoration.blue {
+            background: #3b82f6;
+            bottom: -100px;
+            right: -100px;
+        }
+        
+        /* Responsive */
+        @media (max-width: 480px) {
+            .receipt {
+                padding: 20px 15px;
+            }
+            
+            .error-code {
+                font-size: 36px;
+            }
+            
+            h1 {
+                font-size: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="bg-decoration purple"></div>
+    <div class="bg-decoration blue"></div>
+    
+    <div class="container">
+        <div class="receipt">
+            <div class="receipt-header">CHECK SPLITTER</div>
+            <div class="receipt-body">
+                <div class="receipt-line">
+                    <span>Page you wanted</span>
+                    <span>$0.00</span>
+                </div>
+                <div class="receipt-line">
+                    <span>What we found</span>
+                    <span>NOPE</span>
+                </div>
+                <div class="receipt-line">
+                    <span>Disappointment</span>
+                    <span>FREE</span>
+                </div>
+                <div class="receipt-line receipt-total">
+                    <span>ERROR CODE</span>
+                    <span>404</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="error-code">
+            <span>4</span><span>0</span><span>4</span>
+        </div>
+        
+        <h1>Oops! This page got lost</h1>
+        <p>Looks like this page wasn't on the receipt. Maybe it was split to someone else's tab?</p>
+        
+        <a href="/" class="home-btn">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+            </svg>
+            Back to Home
+        </a>
+    </div>
+</body>
+</html>

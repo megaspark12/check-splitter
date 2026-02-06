@@ -75,6 +75,16 @@ app = FastAPI(
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     """Handle HTTP exceptions with consistent format."""
+    # Serve custom 404 page for browser requests
+    if exc.status_code == 404:
+        accept_header = request.headers.get("accept", "")
+        if "text/html" in accept_header:
+            return FileResponse(
+                str(static_dir / "404.html"),
+                status_code=404,
+                media_type="text/html"
+            )
+    
     return JSONResponse(
         status_code=exc.status_code,
         content={
