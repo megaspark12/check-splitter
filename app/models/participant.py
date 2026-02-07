@@ -23,6 +23,7 @@ class Participant(Base):
     # Relationships
     session = relationship("Session", back_populates="participants")
     assignments = relationship("ItemAssignment", back_populates="participant", cascade="all, delete-orphan")
+    discounts = relationship("Discount", back_populates="participant", cascade="all, delete-orphan")
     
     def __repr__(self):
         return f"<Participant(name={self.name}, is_host={self.is_host})>"

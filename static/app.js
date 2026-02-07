@@ -13,12 +13,23 @@ let currentTipPercentage = 10;
 let syncInterval = null;
 let currency = { code: 'USD', symbol: '$', name: 'US Dollar' };
 
+// Adaptive sync configuration
+let lastUserAction = Date.now();
+const SYNC_INTERVAL_ACTIVE = 5000;   // 5 seconds when active
+const SYNC_INTERVAL_IDLE = 10000;    // 10 seconds when idle
+const IDLE_THRESHOLD = 30000;        // 30 seconds to consider idle
+
 // DOM Elements
 const pages = {
     landing: document.getElementById('landing-page'),
     session: document.getElementById('session-page'),
     participant: document.getElementById('participant-page')
 };
+
+// Track user activity for adaptive sync
+function trackUserAction() {
+    lastUserAction = Date.now();
+}
 
 // Utility Functions
 function showPage(pageName) {
@@ -33,10 +44,15 @@ function showPage(pageName) {
     }
 }
 
+function getSyncInterval() {
+    const timeSinceAction = Date.now() - lastUserAction;
+    return timeSinceAction > IDLE_THRESHOLD ? SYNC_INTERVAL_IDLE : SYNC_INTERVAL_ACTIVE;
+}
+
 function startSync() {
     if (syncInterval) return; // Already syncing
     
-    syncInterval = setInterval(async () => {
+    const doSync = async () => {
         if (!currentSession) return;
         
         try {
@@ -44,12 +60,21 @@ function startSync() {
         } catch (error) {
             // Sync errors are handled inside syncSession
         }
-    }, 3000); // Sync every 3 seconds
+        
+        // Schedule next sync with adaptive interval
+        if (syncInterval) {
+            clearTimeout(syncInterval);
+            syncInterval = setTimeout(doSync, getSyncInterval());
+        }
+    };
+    
+    // Start with active interval
+    syncInterval = setTimeout(doSync, SYNC_INTERVAL_ACTIVE);
 }
 
 function stopSync() {
     if (syncInterval) {
-        clearInterval(syncInterval);
+        clearTimeout(syncInterval);
         syncInterval = null;
     }
 }
@@ -78,23 +103,27 @@ async function syncSession() {
             }
         }
         
-        // Check if any data changed (items, participants, or assignments)
+        // Check if any data changed (items, participants, discounts, or assignments)
         const oldDataJson = JSON.stringify({
             items: currentSession.items,
-            participants: currentSession.participants
+            participants: currentSession.participants,
+            discounts: currentSession.discounts || []
         });
         const newDataJson = JSON.stringify({
             items: session.items,
-            participants: session.participants
+            participants: session.participants,
+            discounts: session.discounts || []
         });
         
         const hasChanges = oldDataJson !== newDataJson;
         currentSession = session;
         
         if (isHost) {
-            // Update host view
+            // Update host view when data changes
             if (hasChanges) {
-                await loadParticipants();
+                renderParticipantsList();
+                updateDiscountParticipantDropdown();
+                renderDiscountsList();  // Use session.discounts directly, no API call
                 if (session.items && session.items.length > 0) {
                     displayItems(session.items, session.participants);
                     updateHostTotal();
@@ -126,17 +155,41 @@ async function updateSummary() {
         
         const content = document.getElementById('summary-content');
         
-        content.innerHTML = summary.participants.map(p => `
-            <div class="summary-row">
-                <div>
-                    <span class="name">${p.participant_name}</span>
-                    <div style="font-size: 0.75rem; color: var(--text-muted);">
-                        Items: ${formatCurrency(p.items_subtotal)} + Tax: ${formatCurrency(p.tax_share)} + Tip: ${formatCurrency(p.tip_amount)}
+        content.innerHTML = summary.participants.map(p => {
+            const hasDiscount = p.discount_amount && p.discount_amount > 0;
+            const discountBadges = p.applied_discounts && p.applied_discounts.length > 0
+                ? p.applied_discounts.map(d => `<span class="discount-badge">${d.name}</span>`).join('')
+                : '';
+            
+            let breakdown = `Items: ${formatCurrency(p.items_subtotal)}`;
+            if (hasDiscount) {
+                breakdown += ` - Discount: ${formatCurrency(p.discount_amount)}`;
+            }
+            breakdown += ` + Tax: ${formatCurrency(p.tax_share)} + Tip: ${formatCurrency(p.tip_amount)}`;
+            
+            return `
+                <div class="summary-row">
+                    <div>
+                        <span class="name">${p.participant_name}</span>
+                        ${discountBadges ? `<div class="summary-discounts">${discountBadges}</div>` : ''}
+                        <div style="font-size: 0.75rem; color: var(--text-muted);">
+                            ${breakdown}
+                        </div>
                     </div>
+                    <span class="amount">${formatCurrency(p.total)}</span>
                 </div>
-                <span class="amount">${formatCurrency(p.total)}</span>
-            </div>
-        `).join('');
+            `;
+        }).join('');
+        
+        // Add total discount row if any discounts applied
+        if (summary.total_discount && summary.total_discount > 0) {
+            content.innerHTML += `
+                <div class="summary-row summary-discount">
+                    <span class="name">🏷️ Total Discounts</span>
+                    <span class="amount">-${formatCurrency(summary.total_discount)}</span>
+                </div>
+            `;
+        }
         
         // Add unassigned items warning if any
         if (summary.unassigned_total > 0) {
@@ -371,7 +424,14 @@ async function loadSession(code) {
             currentTipPercentage = currentParticipant?.tip_percentage || 10;
         }
         
-        await loadParticipants();
+        // Use session data directly - no separate API calls
+        renderParticipantsList();
+        
+        // Update discount participant dropdown and render discounts (host only)
+        if (isHost) {
+            updateDiscountParticipantDropdown();
+            renderDiscountsList();
+        }
         
         if (session.items && session.items.length > 0) {
             displayItems(session.items, session.participants);
@@ -387,25 +447,28 @@ async function loadSession(code) {
     }
 }
 
+// Render participants from session data (no API call)
+function renderParticipantsList() {
+    if (!currentSession) return;
+    
+    const participants = currentSession.participants || [];
+    const list = document.getElementById('participants-list');
+    const count = document.getElementById('participants-count');
+    
+    count.textContent = participants.length;
+    
+    list.innerHTML = participants.map(p => `
+        <div class="participant-chip ${p.is_host ? 'host' : ''}">
+            <div class="participant-avatar">${p.name.charAt(0).toUpperCase()}</div>
+            <span>${p.name}</span>
+            ${isHost && !p.is_host ? `<button class="participant-remove" onclick="event.stopPropagation(); removeParticipant('${p.id}')" title="Remove">✕</button>` : ''}
+        </div>
+    `).join('');
+}
+
+// Keep loadParticipants for backward compatibility but use renderParticipantsList
 async function loadParticipants() {
-    try {
-        const participants = await apiRequest(`/sessions/${currentSession.code}/participants`);
-        const list = document.getElementById('participants-list');
-        const count = document.getElementById('participants-count');
-        
-        count.textContent = participants.length;
-        
-        list.innerHTML = participants.map(p => `
-            <div class="participant-chip ${p.is_host ? 'host' : ''}">
-                <div class="participant-avatar">${p.name.charAt(0).toUpperCase()}</div>
-                <span>${p.name}</span>
-                ${isHost && !p.is_host ? `<button class="participant-remove" onclick="event.stopPropagation(); removeParticipant('${p.id}')" title="Remove">✕</button>` : ''}
-            </div>
-        `).join('');
-        
-    } catch (error) {
-        // Silently fail - will retry on next sync
-    }
+    renderParticipantsList();
 }
 
 async function removeParticipant(participantId) {
@@ -981,6 +1044,154 @@ function updateYourTotal() {
     document.getElementById('your-grand-total').textContent = formatCurrency(grandTotal);
 }
 
+// Discounts Management
+function toggleDiscountsSection() {
+    const section = document.getElementById('discounts-section');
+    const content = document.getElementById('discount-content');
+    const isExpanded = section.classList.contains('expanded');
+    
+    if (isExpanded) {
+        section.classList.remove('expanded');
+        content.hidden = true;
+    } else {
+        section.classList.add('expanded');
+        content.hidden = false;
+    }
+}
+
+// Render discounts from session data (no separate API call)
+function renderDiscountsList() {
+    if (!currentSession || !isHost) return;
+    
+    const discounts = currentSession.discounts || [];
+    const list = document.getElementById('discounts-list');
+    const count = document.getElementById('discounts-count');
+    
+    if (!list || !count) return;
+    
+    count.textContent = discounts.length;
+    
+    if (discounts.length === 0) {
+        list.innerHTML = '';
+        return;
+    }
+    
+    list.innerHTML = discounts.map(d => {
+        const targetName = d.participant_id 
+            ? currentSession.participants.find(p => p.id === d.participant_id)?.name || 'Unknown'
+            : 'Everyone';
+        const valueDisplay = d.discount_type === 'percentage' 
+            ? `${d.value}%` 
+            : formatCurrency(d.value);
+        
+        return `
+            <div class="discount-item" data-id="${d.id}">
+                <div class="discount-item-info">
+                    <div class="discount-item-name">${d.name}</div>
+                    <div class="discount-item-meta">
+                        <span class="discount-item-value">${valueDisplay} off</span>
+                        <span class="discount-item-target">→ ${targetName}</span>
+                    </div>
+                </div>
+                <button class="discount-remove-btn" onclick="deleteDiscount('${d.id}')" title="Remove">✕</button>
+            </div>
+        `;
+    }).join('');
+}
+
+// Keep loadDiscounts for backward compatibility
+async function loadDiscounts() {
+    renderDiscountsList();
+}
+
+async function addDiscount() {
+    trackUserAction();
+    
+    const nameInput = document.getElementById('discount-name');
+    const typeSelect = document.getElementById('discount-type');
+    const valueInput = document.getElementById('discount-value');
+    const targetSelect = document.getElementById('discount-target');
+    
+    const name = nameInput.value.trim() || null; // Optional - server will auto-generate
+    const discountType = typeSelect.value;
+    const value = parseFloat(valueInput.value);
+    const participantId = targetSelect.value || null;
+    
+    if (isNaN(value) || value <= 0) {
+        showError('Please enter a valid discount amount');
+        return;
+    }
+    
+    if (discountType === 'percentage' && value > 100) {
+        showError('Percentage cannot exceed 100%');
+        return;
+    }
+    
+    try {
+        await apiRequest(`/sessions/${currentSession.code}/discounts`, {
+            method: 'POST',
+            body: JSON.stringify({
+                name,
+                discount_type: discountType,
+                value,
+                participant_id: participantId
+            })
+        });
+        
+        // Clear form
+        nameInput.value = '';
+        valueInput.value = '';
+        
+        // Reload session to get updated discounts
+        await loadSession(currentSession.code);
+        showSuccess('Discount added');
+        
+    } catch (error) {
+        showError('Failed to add discount: ' + error.message);
+    }
+}
+
+async function deleteDiscount(discountId) {
+    trackUserAction();
+    
+    try {
+        await apiRequest(`/sessions/${currentSession.code}/discounts/${discountId}`, {
+            method: 'DELETE'
+        });
+        
+        // Reload session to get updated discounts
+        await loadSession(currentSession.code);
+        showSuccess('Discount removed');
+        
+    } catch (error) {
+        showError('Failed to remove discount: ' + error.message);
+    }
+}
+
+function updateDiscountParticipantDropdown() {
+    const select = document.getElementById('discount-target');
+    if (!select || !currentSession) return;
+    
+    // Preserve current selection if possible
+    const currentValue = select.value;
+    
+    // Reset with "Everyone" option
+    select.innerHTML = '<option value="">Everyone</option>';
+    
+    // Add all participants
+    currentSession.participants.forEach(p => {
+        const option = document.createElement('option');
+        option.value = p.id;
+        option.textContent = p.name;
+        select.appendChild(option);
+    });
+    
+    // Restore selection if participant still exists
+    if (currentValue && currentSession.participants.some(p => p.id === currentValue)) {
+        select.value = currentValue;
+    }
+}
+
 // Initialize
 // Register Service Worker for PWA
 async function registerServiceWorker() {
@@ -1039,7 +1250,26 @@ document.addEventListener('DOMContentLoaded', () => {
     setupTipHandlers();
     
     // Add item button
-    document.getElementById('add-item-btn').addEventListener('click', addItem);
+    document.getElementById('add-item-btn').addEventListener('click', () => {
+        trackUserAction();
+        addItem();
+    });
+    
+    // Discount section toggle
+    const discountToggle = document.getElementById('discount-toggle');
+    if (discountToggle) {
+        discountToggle.addEventListener('click', toggleDiscountsSection);
+    }
+    
+    // Add discount button
+    const addDiscountBtn = document.getElementById('add-discount-btn');
+    if (addDiscountBtn) {
+        addDiscountBtn.addEventListener('click', addDiscount);
+    }
+    
+    // Track user activity for adaptive sync
+    document.addEventListener('click', trackUserAction);
+    document.addEventListener('keydown', trackUserAction);
     
     // Refresh button (participant)
     document.getElementById('refresh-btn').addEventListener('click', loadParticipantView);

@@ -25,6 +25,7 @@ from app.api import (
     participants_router,
     assignments_router,
     utilities_router,
+    discounts_router,
 )
 
 
@@ -154,6 +155,7 @@ app.include_router(items_router)
 app.include_router(participants_router)
 app.include_router(assignments_router)
 app.include_router(utilities_router)
+app.include_router(discounts_router)
 
 
 # ====== Static Files ======

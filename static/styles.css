@@ -1201,3 +1201,230 @@ input::placeholder {
     background: linear-gradient(135deg, #ff6b6b, #ee5a5a);
     color: white;
 }
+
+/* ===== Discount Section ===== */
+.discount-card {
+    overflow: hidden;
+}
+
+.discount-header {
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: background 0.2s ease;
+    margin: -16px;
+    padding: 16px;
+    border-radius: var(--radius-md);
+}
+
+.discount-header:hover {
+    background: var(--bg-secondary);
+}
+
+.discount-header-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.discount-header-left h2 {
+    margin: 0;
+}
+
+.discount-chevron {
+    font-size: 0.875rem;
+    color: var(--text-muted);
+    transition: transform 0.2s ease;
+    display: inline-block;
+}
+
+.discount-card.expanded .discount-chevron {
+    transform: rotate(90deg);
+}
+
+.discount-hint {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    transition: opacity 0.2s ease;
+}
+
+.discount-card.expanded .discount-hint {
+    opacity: 0;
+}
+
+.discount-content {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+}
+
+.discount-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.discount-list:empty {
+    display: none;
+}
+
+.discount-list:empty + .discount-add-form {
+    margin-top: 0;
+}
+
+.discount-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    border-left: 3px solid var(--secondary);
+}
+
+.discount-item-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.discount-item-name {
+    font-weight: 600;
+    font-size: 0.875rem;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.discount-item-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 2px;
+}
+
+.discount-item-value {
+    color: var(--secondary);
+    font-weight: 700;
+}
+
+.discount-item-target {
+    color: var(--text-muted);
+}
+
+.discount-remove-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 4px 8px;
+    font-size: 1rem;
+    opacity: 0.5;
+    transition: all 0.2s ease;
+    border-radius: var(--radius-sm);
+}
+
+.discount-remove-btn:hover {
+    opacity: 1;
+    color: var(--danger);
+    background: rgba(239, 68, 68, 0.1);
+}
+
+/* Discount Form */
+.discount-add-form {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.discount-form-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.discount-amount-input {
+    display: flex;
+    align-items: stretch;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    background: var(--bg-primary);
+    flex-shrink: 0;
+}
+
+.discount-amount-input input {
+    border: none;
+    border-radius: 0;
+    width: 70px;
+    text-align: center;
+    padding: 10px 8px;
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+.discount-amount-input input:focus {
+    outline: none;
+    box-shadow: none;
+}
+
+.discount-amount-input select {
+    border: none;
+    border-left: 1px solid var(--border);
+    border-radius: 0;
+    background: var(--bg-secondary);
+    padding: 10px 12px;
+    font-weight: 700;
+    color: var(--secondary);
+    cursor: pointer;
+    min-width: 45px;
+}
+
+.discount-form-label {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+.discount-form-row select#discount-target {
+    flex: 1;
+    min-width: 100px;
+    max-width: 200px;
+}
+
+.discount-label-input {
+    flex: 1;
+    min-width: 120px;
+}
+
+.discount-form-row .btn {
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+/* Discount in summary */
+.summary-discount {
+    color: var(--secondary);
+    font-weight: 500;
+}
+
+.summary-discounts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 4px;
+}
+
+.discount-badge {
+    display: inline-block;
+    background: var(--secondary);
+    color: white;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+}

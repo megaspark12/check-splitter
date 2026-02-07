@@ -37,6 +37,7 @@ class Session(Base):
     # Relationships
     items = relationship("Item", back_populates="session", cascade="all, delete-orphan")
     participants = relationship("Participant", back_populates="session", cascade="all, delete-orphan")
+    discounts = relationship("Discount", back_populates="session", cascade="all, delete-orphan")
     
     def __repr__(self):
         return f"<Session(code={self.code}, status={self.status})>"

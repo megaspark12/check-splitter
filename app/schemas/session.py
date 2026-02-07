@@ -47,6 +47,33 @@ class ParticipantInSession(BaseModel):
         from_attributes = True
 
 
+class DiscountInSession(BaseModel):
+    """Discount within a session response."""
+    id: str
+    name: str
+    discount_type: str
+    value: Decimal
+    participant_id: Optional[str] = None
+    
+    class Config:
+        from_attributes = True
+    
+    @classmethod
+    def model_validate(cls, obj, **kwargs):
+        """Handle enum conversion for discount_type."""
+        if hasattr(obj, 'discount_type') and hasattr(obj.discount_type, 'value'):
+            # Convert enum to string value
+            data = {
+                'id': obj.id,
+                'name': obj.name,
+                'discount_type': obj.discount_type.value,
+                'value': obj.value,
+                'participant_id': obj.participant_id
+            }
+            return cls(**data)
+        return super().model_validate(obj, **kwargs)
+
+
 class SessionResponse(BaseModel):
     """Schema for session response."""
     id: str
@@ -57,9 +84,19 @@ class SessionResponse(BaseModel):
     expires_at: datetime
     items: List[ItemInSession] = []
     participants: List[ParticipantInSession] = []
+    discounts: List[DiscountInSession] = []
     
     class Config:
         from_attributes = True
+
+
+class AppliedDiscount(BaseModel):
+    """A discount that was applied to a participant."""
+    id: str
+    name: str
+    type: str
+    value: Decimal
+    amount: Decimal
 
 
 class ParticipantSummary(BaseModel):
@@ -69,8 +106,10 @@ class ParticipantSummary(BaseModel):
     items_subtotal: Decimal
     tax_share: Decimal
     tip_amount: Decimal
+    discount_amount: Decimal = Decimal("0.00")
     total: Decimal
     items: List[dict]
+    applied_discounts: List[AppliedDiscount] = []
 
 
 class SessionSummary(BaseModel):
@@ -79,6 +118,7 @@ class SessionSummary(BaseModel):
     session_code: str
     receipt_total: Decimal
     tax_total: Decimal
+    total_discount: Decimal = Decimal("0.00")
     calculated_total: Decimal
     participants: List[ParticipantSummary]
     unassigned_items: List[dict]

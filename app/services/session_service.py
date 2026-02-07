@@ -81,11 +81,13 @@ class SessionService:
         await self.db.commit()
         
         # Reload with relationships
+        from app.models.discount import Discount
         stmt = (
             select(Session)
             .where(Session.id == session.id)
             .options(selectinload(Session.items))
             .options(selectinload(Session.participants))
+            .options(selectinload(Session.discounts))
         )
         result = await self.db.execute(stmt)
         return result.scalar_one()
@@ -102,6 +104,7 @@ class SessionService:
         """
         from app.models.item import Item
         from app.models.assignment import ItemAssignment
+        from app.models.discount import Discount
         
         result = await self.db.execute(
             select(Session)
@@ -109,6 +112,7 @@ class SessionService:
             .options(
                 selectinload(Session.items).selectinload(Item.assignments),
                 selectinload(Session.participants),
+                selectinload(Session.discounts),
             )
         )
         return result.scalar_one_or_none()

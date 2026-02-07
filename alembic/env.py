@@ -17,7 +17,7 @@ from app.database import Base
 from app.config import get_settings
 
 # Import all models to ensure they're registered with Base.metadata
-from app.models import session, participant, item, assignment  # noqa: F401
+from app.models import session, participant, item, assignment, discount  # noqa: F401
 
 # this is the Alembic Config object
 config = context.config

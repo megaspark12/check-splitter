@@ -354,9 +354,20 @@ async def get_session_summary(
                 'share_count': assignment.share_count,
             })())
     
+    # Build discounts list
+    discounts = []
+    for d in session.discounts:
+        discounts.append(type('Discount', (), {
+            'id': d.id,
+            'name': d.name,
+            'discount_type': d.discount_type.value,  # Convert enum to string
+            'value': d.value,
+            'participant_id': d.participant_id,
+        })())
+    
     # Calculate split
     calculator = BillCalculator()
-    result = calculator.calculate_full_split(items, participants, assignments)
+    result = calculator.calculate_full_split(items, participants, assignments, discounts)
     
     # Calculate totals
     receipt_total = sum(
@@ -381,12 +392,15 @@ async def get_session_summary(
                 items_subtotal=p_data["items_subtotal"],
                 tax_share=p_data["tax_share"],
                 tip_amount=p_data["tip_amount"],
+                discount_amount=p_data.get("discount_amount", 0),
                 total=p_data["total"],
                 items=p_data["items"],
+                applied_discounts=p_data.get("applied_discounts", []),
             ))
     
     # Get unassigned items
     unassigned = result.get("unassigned_items", [])
+    total_discount = result.get("total_discount", 0)
     
     calculated_total = sum(ps.total for ps in participant_summaries)
     
@@ -395,6 +409,7 @@ async def get_session_summary(
         session_code=session.code,
         receipt_total=receipt_total,
         tax_total=tax_total,
+        total_discount=total_discount,
         calculated_total=calculated_total,
         participants=participant_summaries,
         unassigned_items=unassigned,

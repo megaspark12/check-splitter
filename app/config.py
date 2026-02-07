@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     uploads_dir: str = "uploads"
     
     # Rate limiting
-    rate_limit_per_minute: int = 60
+    rate_limit_per_minute: int = 180
     
     # Logging
     log_level: str = "INFO"
