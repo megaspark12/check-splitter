@@ -1,7 +1,7 @@
 """
 Sessions API routes.
 
-Handles session creation, retrieval, QR codes, and summaries.
+Handles session creation, retrieval, QR codes, summaries, and WebSocket connections.
 """
 import os
 import re
@@ -11,7 +11,7 @@ import aiofiles
 from pathlib import Path
 from datetime import datetime
 from decimal import Decimal
-from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile, File, Request
+from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile, File, Request, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,9 +25,47 @@ from app.services.calculator import BillCalculator
 from app.services.ocr_service import OCRService
 from app.models.item import Item
 from app.models.session import Session, SessionStatus
+from app.websocket_manager import manager
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 logger = get_logger("api.sessions")
+
+
+@router.websocket("/ws/{code}")
+async def websocket_endpoint(websocket: WebSocket, code: str):
+    """
+    WebSocket endpoint for real-time session updates.
+    
+    Clients connect to receive instant notifications when session data changes.
+    When a notification is received, clients should fetch the latest data.
+    """
+    session_code = code.upper()
+    await manager.connect(websocket, session_code)
+    
+    try:
+        # Send initial connection confirmation
+        await websocket.send_json({
+            "type": "connected",
+            "session_code": session_code,
+        })
+        
+        # Keep connection alive and listen for client messages
+        while True:
+            try:
+                # Wait for any message from client (ping/pong or disconnect)
+                data = await websocket.receive_text()
+                
+                # Client can send ping to keep alive
+                if data == "ping":
+                    await websocket.send_json({"type": "pong"})
+                    
+            except WebSocketDisconnect:
+                break
+                
+    except Exception as e:
+        logger.error(f"WebSocket error for session {session_code}: {e}")
+    finally:
+        await manager.disconnect(websocket, session_code)
 
 
 def get_client_network_hash(request: Request) -> str:

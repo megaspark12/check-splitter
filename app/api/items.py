@@ -4,11 +4,12 @@ Items API routes.
 Handles CRUD operations for receipt items.
 """
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.websocket_manager import manager
 from app.models.session import Session
 from app.models.item import Item
 from app.schemas.item import ItemCreate, ItemUpdate, ItemResponse
@@ -40,6 +41,7 @@ async def list_items(
 async def create_item(
     code: str,
     item_data: ItemCreate,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db)
 ):
     """Add an item to a session."""
@@ -62,6 +64,9 @@ async def create_item(
     await db.commit()
     await db.refresh(item)
     
+    # Notify all connected clients
+    background_tasks.add_task(manager.notify_session_update, code.upper())
+    
     return item
 
 
@@ -70,6 +75,7 @@ async def update_item(
     code: str,
     item_id: str,
     item_data: ItemUpdate,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db)
 ):
     """Update an item."""
@@ -102,6 +108,9 @@ async def update_item(
     await db.commit()
     await db.refresh(item)
     
+    # Notify all connected clients
+    background_tasks.add_task(manager.notify_session_update, code.upper())
+    
     return item
 
 
@@ -109,6 +118,7 @@ async def update_item(
 async def delete_item(
     code: str,
     item_id: str,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db)
 ):
     """Delete an item."""
@@ -127,3 +137,6 @@ async def delete_item(
     
     await db.delete(item)
     await db.commit()
+    
+    # Notify all connected clients
+    background_tasks.add_task(manager.notify_session_update, code.upper())

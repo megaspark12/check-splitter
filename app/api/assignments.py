@@ -4,11 +4,12 @@ Assignments API routes.
 Handles item-to-participant assignments.
 """
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.websocket_manager import manager
 from app.models.session import Session
 from app.models.item import Item
 from app.models.participant import Participant
@@ -50,6 +51,7 @@ async def list_assignments(
 async def create_assignment(
     code: str,
     assignment_data: AssignmentCreate,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db)
 ):
     """Assign an item to a participant."""
@@ -91,6 +93,8 @@ async def create_assignment(
         existing.share_count = assignment_data.share_count
         await db.commit()
         await db.refresh(existing)
+        # Notify all clients
+        background_tasks.add_task(manager.notify_session_update, code.upper())
         return existing
     
     # Create new assignment
@@ -104,6 +108,9 @@ async def create_assignment(
     await db.commit()
     await db.refresh(assignment)
     
+    # Notify all clients
+    background_tasks.add_task(manager.notify_session_update, code.upper())
+    
     return assignment
 
 
@@ -111,6 +118,7 @@ async def create_assignment(
 async def delete_assignment(
     code: str,
     assignment_id: str,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db)
 ):
     """Remove an item assignment."""
@@ -132,3 +140,6 @@ async def delete_assignment(
     
     await db.delete(assignment)
     await db.commit()
+    
+    # Notify all clients
+    background_tasks.add_task(manager.notify_session_update, code.upper())

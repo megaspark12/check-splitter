@@ -23,6 +23,9 @@
     <div class="app-container">
         <!-- Landing Page -->
         <div id="landing-page" class="page active">
+            <!-- Quick Rejoin Banner -->
+            <div id="rejoin-banner" class="rejoin-banner" style="display: none;"></div>
+
             <div class="landing-hero">
                 <div class="logo">🧾</div>
                 <h1>Check Splitter</h1>
@@ -75,6 +78,15 @@
                     </div>
                 </div>
                 
+                <!-- Previous Sessions -->
+                <div id="session-history-panel" class="card card-history" style="display: none;">
+                    <div class="history-header">
+                        <h2>🕐 Recent Sessions</h2>
+                    </div>
+                    <p class="card-desc">Tap to rejoin a previous session</p>
+                    <div class="session-history-list"></div>
+                </div>
+
                 <!-- Quick Join Modal -->
                 <div id="quick-join-modal" class="modal">
                     <div class="modal-content">
@@ -112,6 +124,10 @@
                         <button id="show-qr-btn" class="btn btn-small btn-secondary">
                             <span class="btn-icon">📱</span>
                             QR Code
+                        </button>
+                        <button id="share-link-btn" class="btn btn-small btn-secondary">
+                            <span class="btn-icon">🔗</span>
+                            Share Link
                         </button>
                         <button id="end-session-btn" class="btn btn-small btn-danger">
                             <span class="btn-icon">🚪</span>
@@ -167,11 +183,6 @@
                 <input type="file" id="receipt-input" accept="image/*" hidden>
                 <input type="file" id="camera-input" accept="image/*" capture="environment" hidden>
                 <div class="upload-area" id="upload-area">
-                    <div class="upload-placeholder">
-                        <div class="upload-icon">📤</div>
-                        <p class="upload-text">Or drag receipt here</p>
-                        <p class="upload-hint">JPEG, PNG, or WebP</p>
-                    </div>
                     <img id="receipt-preview" class="receipt-preview" hidden>
                 </div>
                 <button id="process-btn" class="btn btn-primary" disabled>
@@ -300,12 +311,44 @@
                     <span id="participant-name-display" class="participant-name"></span>
                     <span class="session-badge">Session: <strong id="participant-session-code"></strong></span>
                 </div>
+                <div class="participant-code-actions">
+                    <button id="participant-copy-code-btn" class="btn btn-small btn-secondary">
+                        <span class="btn-icon">📋</span>
+                        <span id="participant-copy-btn-text">Copy Code</span>
+                    </button>
+                    <button id="participant-show-qr-btn" class="btn btn-small btn-secondary">
+                        <span class="btn-icon">📱</span>
+                        QR Code
+                    </button>
+                    <button id="participant-share-link-btn" class="btn btn-small btn-secondary">
+                        <span class="btn-icon">🔗</span>
+                        Share Link
+                    </button>
+                    <button id="participant-leave-session-btn" class="btn btn-small btn-danger">
+                        <span class="btn-icon">🚪</span>
+                        Leave
+                    </button>
+                </div>
             </header>
 
             <!-- Instructions -->
             <div class="instructions-banner">
                 <span class="instructions-icon">👆</span>
                 <p>Tap the items you ordered to select them</p>
+            </div>
+
+            <!-- QR Modal for Participant -->
+            <div id="participant-qr-modal" class="modal">
+                <div class="modal-content">
+                    <button class="close-btn" id="participant-qr-close-btn">&times;</button>
+                    <h3>Scan to Join</h3>
+                    <img id="participant-qr-image" src="" alt="QR Code">
+                    <p class="qr-code-text">Code: <strong id="participant-qr-code-text"></strong></p>
+                    <button id="participant-share-link-modal-btn" class="btn btn-small btn-secondary" style="margin-top: 12px;">
+                        <span class="btn-icon">🔗</span>
+                        Share Link
+                    </button>
+                </div>
             </div>
 
             <!-- Item Selection -->
@@ -339,10 +382,18 @@
             </div>
 
             <!-- Refresh Button -->
-            <button id="refresh-btn" class="btn btn-secondary" style="width: 100%; margin-bottom: 16px;">
+            <button id="refresh-btn" class="btn btn-secondary refresh-btn">
                 <span class="btn-icon">🔄</span>
                 Refresh Items
             </button>
+
+            <!-- Discounts Section (Read-only for participants) -->
+            <div id="participant-discounts-section" class="card card-discounts-readonly" hidden>
+                <div class="card-header">
+                    <h2>🏷️ Discounts Applied</h2>
+                </div>
+                <div class="participant-discounts-list"></div>
+            </div>
 
             <!-- Your Total - Sticky Footer -->
             <div class="total-card">
@@ -350,6 +401,10 @@
                     <div class="total-row">
                         <span>Your Items</span>
                         <span id="your-items-total">$0.00</span>
+                    </div>
+                    <div class="total-row" id="your-discount-row" style="display: none; color: #22c55e;">
+                        <span>Discount</span>
+                        <span id="your-discount">-$0.00</span>
                     </div>
                     <div class="total-row">
                         <span>Tax (proportional)</span>

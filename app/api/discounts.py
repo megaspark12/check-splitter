@@ -4,12 +4,13 @@ Discounts API routes.
 Handles discount creation, updates, and deletion for sessions.
 """
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.database import get_db
+from app.websocket_manager import manager
 from app.models.discount import Discount
 from app.models.session import Session
 from app.models.participant import Participant
@@ -57,6 +58,7 @@ async def list_discounts(
 async def create_discount(
     session_code: str,
     discount_data: DiscountCreate,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db)
 ):
     """Create a new discount for a session."""
@@ -101,6 +103,9 @@ async def create_discount(
     await db.commit()
     await db.refresh(discount)
     
+    # Notify all connected clients
+    background_tasks.add_task(manager.notify_session_update, session_code.upper())
+    
     return DiscountResponse(
         id=discount.id,
         session_id=discount.session_id,
@@ -117,6 +122,7 @@ async def update_discount(
     session_code: str,
     discount_id: str,
     discount_data: DiscountUpdate,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db)
 ):
     """Update a discount."""
@@ -166,6 +172,9 @@ async def update_discount(
     )
     discount = result.scalar_one()
     
+    # Notify all connected clients
+    background_tasks.add_task(manager.notify_session_update, session_code.upper())
+    
     return DiscountResponse(
         id=discount.id,
         session_id=discount.session_id,
@@ -181,6 +190,7 @@ async def update_discount(
 async def delete_discount(
     session_code: str,
     discount_id: str,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db)
 ):
     """Delete a discount."""
@@ -195,3 +205,6 @@ async def delete_discount(
     
     await db.delete(discount)
     await db.commit()
+    
+    # Notify all connected clients
+    background_tasks.add_task(manager.notify_session_update, session_code.upper())

@@ -13,11 +13,244 @@ let currentTipPercentage = 10;
 let syncInterval = null;
 let currency = { code: 'USD', symbol: '$', name: 'US Dollar' };
 
-// Adaptive sync configuration
+// WebSocket state
+let websocket = null;
+let wsReconnectAttempts = 0;
+const MAX_WS_RECONNECT_ATTEMPTS = 5;
+let wsPingInterval = null;
+
+// Adaptive sync configuration (fallback when WebSocket disconnected)
 let lastUserAction = Date.now();
-const SYNC_INTERVAL_ACTIVE = 5000;   // 5 seconds when active
-const SYNC_INTERVAL_IDLE = 10000;    // 10 seconds when idle
+const SYNC_INTERVAL_ACTIVE = 2000;   // 2 seconds when active (fast sync)
+const SYNC_INTERVAL_IDLE = 5000;     // 5 seconds when idle
 const IDLE_THRESHOLD = 30000;        // 30 seconds to consider idle
+
+// Session History (localStorage)
+const SESSION_HISTORY_KEY = 'checkSplitter_sessionHistory';
+const LAST_SESSION_KEY = 'checkSplitter_lastSession';
+const MAX_HISTORY_ITEMS = 10;
+
+function saveSessionToHistory(code, participantId, participantName, hostName, isHostFlag) {
+    const entry = {
+        code: code.toUpperCase(),
+        participantId,
+        participantName,
+        hostName,
+        isHost: isHostFlag,
+        timestamp: Date.now()
+    };
+    
+    // Save as last session for quick rejoin
+    localStorage.setItem(LAST_SESSION_KEY, JSON.stringify(entry));
+    
+    // Add to history (dedup by code)
+    let history = getSessionHistory();
+    history = history.filter(h => h.code !== entry.code);
+    history.unshift(entry);
+    history = history.slice(0, MAX_HISTORY_ITEMS);
+    localStorage.setItem(SESSION_HISTORY_KEY, JSON.stringify(history));
+}
+
+function getSessionHistory() {
+    try {
+        return JSON.parse(localStorage.getItem(SESSION_HISTORY_KEY)) || [];
+    } catch { return []; }
+}
+
+function getLastSession() {
+    try {
+        return JSON.parse(localStorage.getItem(LAST_SESSION_KEY));
+    } catch { return null; }
+}
+
+function clearLastSession() {
+    localStorage.removeItem(LAST_SESSION_KEY);
+}
+
+function touchLastSessionTimestamp() {
+    // Update the timestamp of the last session so the 5-min auto-rejoin window stays fresh
+    try {
+        const last = getLastSession();
+        if (last) {
+            last.timestamp = Date.now();
+            localStorage.setItem(LAST_SESSION_KEY, JSON.stringify(last));
+        }
+    } catch { /* ignore */ }
+}
+
+function removeSessionFromHistory(code) {
+    let history = getSessionHistory();
+    history = history.filter(h => h.code !== code);
+    localStorage.setItem(SESSION_HISTORY_KEY, JSON.stringify(history));
+    
+    const last = getLastSession();
+    if (last && last.code === code) {
+        clearLastSession();
+    }
+}
+
+async function rejoinSession(code) {
+    // Look up entry from history
+    const history = getSessionHistory();
+    const entry = history.find(h => h.code === code);
+    if (!entry) {
+        showError('Session not found in history');
+        return;
+    }
+    try {
+        // First check if session still exists
+        const session = await apiRequest(`/sessions/${entry.code}`);
+        currentSession = session;
+        
+        if (entry.isHost) {
+            isHost = true;
+            currentParticipant = session.participants.find(p => p.is_host);
+            currentTipPercentage = currentParticipant?.tip_percentage || 10;
+            
+            await loadSession(session.code);
+            document.getElementById('display-code').textContent = session.code;
+            showPage('session');
+            updateStepIndicator(session.items?.length > 0 ? 2 : 1);
+            showToast('Rejoined your session!', 'success');
+        } else {
+            // Check if participant still exists in this session
+            const existingParticipant = session.participants.find(p => p.id === entry.participantId);
+            
+            if (existingParticipant) {
+                // Rejoin as the same participant
+                currentParticipant = existingParticipant;
+                currentTipPercentage = existingParticipant.tip_percentage || 10;
+                isHost = false;
+                
+                document.getElementById('participant-session-code').textContent = entry.code;
+                document.getElementById('participant-name-display').textContent = existingParticipant.name;
+                
+                await loadParticipantView();
+                showPage('participant');
+                showToast('Rejoined the session!', 'success');
+            } else {
+                // Participant was removed, rejoin as new
+                const participant = await apiRequest(`/sessions/${entry.code}/participants`, {
+                    method: 'POST',
+                    body: JSON.stringify({ name: entry.participantName })
+                });
+                
+                currentParticipant = participant;
+                currentTipPercentage = participant.tip_percentage || 10;
+                isHost = false;
+                
+                // Update history with new participant ID
+                saveSessionToHistory(entry.code, participant.id, entry.participantName, entry.hostName, false);
+                
+                document.getElementById('participant-session-code').textContent = entry.code;
+                document.getElementById('participant-name-display').textContent = entry.participantName;
+                
+                await loadParticipantView();
+                showPage('participant');
+                showToast('Rejoined as new participant!', 'success');
+            }
+        }
+    } catch (error) {
+        // Session no longer exists
+        removeSessionFromHistory(entry.code);
+        showError('Session no longer exists');
+        renderSessionHistory();
+        hideRejoinBanner();
+    }
+}
+
+function renderRejoinBanner() {
+    const banner = document.getElementById('rejoin-banner');
+    if (!banner) return;
+    
+    const last = getLastSession();
+    if (!last) {
+        banner.style.display = 'none';
+        return;
+    }
+    
+    // Only show banner for sessions created/joined in the last 6 hours
+    const sixHours = 6 * 60 * 60 * 1000;
+    if (Date.now() - last.timestamp > sixHours) {
+        banner.style.display = 'none';
+        return;
+    }
+    
+    const roleText = last.isHost ? 'Host' : 'Guest';
+    const sessionLabel = last.isHost 
+        ? `Your session (${last.code})` 
+        : `${last.hostName}'s session (${last.code})`;
+    
+    banner.innerHTML = `
+        <div class="rejoin-content">
+            <div class="rejoin-info">
+                <span class="rejoin-icon">⚡</span>
+                <div>
+                    <div class="rejoin-title">Continue where you left off?</div>
+                    <div class="rejoin-detail">${sessionLabel} • ${roleText}</div>
+                </div>
+            </div>
+            <div class="rejoin-actions">
+                <button class="btn btn-primary btn-small rejoin-btn" onclick="rejoinSession('${last.code}')">Rejoin</button>
+                <button class="btn btn-ghost btn-small rejoin-dismiss" onclick="dismissRejoinBanner()">✕</button>
+            </div>
+        </div>
+    `;
+    banner.style.display = 'block';
+}
+
+function dismissRejoinBanner() {
+    const banner = document.getElementById('rejoin-banner');
+    if (banner) {
+        banner.style.display = 'none';
+    }
+    clearLastSession();
+}
+
+function hideRejoinBanner() {
+    const banner = document.getElementById('rejoin-banner');
+    if (banner) banner.style.display = 'none';
+}
+
+function renderSessionHistory() {
+    const container = document.getElementById('session-history-panel');
+    if (!container) return;
+    
+    const history = getSessionHistory();
+    
+    if (history.length === 0) {
+        container.style.display = 'none';
+        return;
+    }
+    
+    container.style.display = 'block';
+    const list = container.querySelector('.session-history-list');
+    if (!list) return;
+    
+    list.innerHTML = history.map(entry => {
+        const timeAgo = getTimeAgo(new Date(entry.timestamp).toISOString());
+        const roleIcon = entry.isHost ? '👑' : '👤';
+        const roleText = entry.isHost ? 'Host' : 'Guest';
+        const sessionLabel = entry.isHost 
+            ? 'Your session' 
+            : `${entry.hostName}'s session`;
+        
+        return `
+            <div class="history-item" onclick="rejoinSession('${entry.code}')">
+                <div class="history-item-info">
+                    <div class="history-item-top">
+                        <span class="history-role">${roleIcon} ${roleText}</span>
+                        <span class="history-code">${entry.code}</span>
+                    </div>
+                    <div class="history-item-detail">
+                        ${sessionLabel} • ${entry.participantName} • ${timeAgo}
+                    </div>
+                </div>
+                <span class="history-join-arrow">→</span>
+            </div>
+        `;
+    }).join('');
+}
 
 // DOM Elements
 const pages = {
@@ -39,6 +272,10 @@ function showPage(pageName) {
     // Manage sync based on page
     if (pageName === 'landing') {
         stopSync();
+        // Refresh landing page data
+        renderRejoinBanner();
+        renderSessionHistory();
+        fetchNearbySessions();
     } else {
         startSync();
     }
@@ -52,6 +289,9 @@ function getSyncInterval() {
 function startSync() {
     if (syncInterval) return; // Already syncing
     
+    // Connect WebSocket for real-time updates
+    connectWebSocket();
+    
     const doSync = async () => {
         if (!currentSession) return;
         
@@ -61,7 +301,7 @@ function startSync() {
             // Sync errors are handled inside syncSession
         }
         
-        // Schedule next sync with adaptive interval
+        // Schedule next sync with adaptive interval (fallback polling)
         if (syncInterval) {
             clearTimeout(syncInterval);
             syncInterval = setTimeout(doSync, getSyncInterval());
@@ -77,11 +317,94 @@ function stopSync() {
         clearTimeout(syncInterval);
         syncInterval = null;
     }
+    disconnectWebSocket();
+}
+
+// WebSocket Functions
+function connectWebSocket() {
+    if (!currentSession) return;
+    
+    // Don't connect if already connected
+    if (websocket && websocket.readyState === WebSocket.OPEN) return;
+    
+    // Build WebSocket URL
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${wsProtocol}//${window.location.host}/api/sessions/ws/${currentSession.code}`;
+    
+    try {
+        websocket = new WebSocket(wsUrl);
+        
+        websocket.onopen = () => {
+            console.log('WebSocket connected');
+            wsReconnectAttempts = 0;
+            
+            // Start ping interval to keep connection alive
+            if (wsPingInterval) clearInterval(wsPingInterval);
+            wsPingInterval = setInterval(() => {
+                if (websocket && websocket.readyState === WebSocket.OPEN) {
+                    websocket.send(JSON.stringify({ type: 'ping' }));
+                }
+            }, 30000); // Ping every 30 seconds
+        };
+        
+        websocket.onmessage = async (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                
+                if (data.type === 'sync') {
+                    // Session data was updated, refresh the view
+                    await syncSession();
+                } else if (data.type === 'pong') {
+                    // Pong received, connection is alive
+                }
+            } catch (error) {
+                console.error('WebSocket message error:', error);
+            }
+        };
+        
+        websocket.onclose = (event) => {
+            console.log('WebSocket closed:', event.code, event.reason);
+            if (wsPingInterval) {
+                clearInterval(wsPingInterval);
+                wsPingInterval = null;
+            }
+            
+            // Attempt reconnection if not intentionally closed
+            if (currentSession && wsReconnectAttempts < MAX_WS_RECONNECT_ATTEMPTS) {
+                wsReconnectAttempts++;
+                const delay = Math.min(1000 * Math.pow(2, wsReconnectAttempts), 30000);
+                console.log(`WebSocket reconnecting in ${delay}ms (attempt ${wsReconnectAttempts})`);
+                setTimeout(connectWebSocket, delay);
+            }
+        };
+        
+        websocket.onerror = (error) => {
+            console.error('WebSocket error:', error);
+        };
+        
+    } catch (error) {
+        console.error('Failed to create WebSocket:', error);
+    }
+}
+
+function disconnectWebSocket() {
+    if (wsPingInterval) {
+        clearInterval(wsPingInterval);
+        wsPingInterval = null;
+    }
+    if (websocket) {
+        websocket.close();
+        websocket = null;
+    }
+    wsReconnectAttempts = 0;
 }
 
 async function syncSession() {
     try {
         const session = await apiRequest(`/sessions/${currentSession.code}`);
+        
+        // Keep last-session timestamp fresh so auto-rejoin works after refresh
+        touchLastSessionTimestamp();
         
         // Check if current participant was removed (for non-hosts)
         if (!isHost && currentParticipant) {
@@ -133,9 +456,14 @@ async function syncSession() {
             if (session.items && session.items.length > 0) {
                 await updateSummary();
             }
-        } else if (hasChanges) {
-            // Refresh participant view only when data changes
-            await loadParticipantView();
+        } else {
+            // Participant view - always refresh to get latest server-calculated totals
+            if (hasChanges) {
+                await loadParticipantView();
+            } else {
+                // Even if no item/participant changes, update totals (discounts may have changed)
+                updateYourTotal();
+            }
         }
     } catch (error) {
         // Session may have been deleted or expired
@@ -319,6 +647,9 @@ async function createSession(hostName) {
         currentParticipant = session.participants.find(p => p.is_host);
         currentTipPercentage = currentParticipant?.tip_percentage || 10;
         
+        // Save to session history for quick rejoin
+        saveSessionToHistory(session.code, currentParticipant?.id, hostName, hostName, true);
+        
         await loadSession(session.code);
         
         document.getElementById('display-code').textContent = session.code;
@@ -335,20 +666,51 @@ async function joinSession(code, name) {
         const session = await apiRequest(`/sessions/${code}`);
         currentSession = session;
         
-        const participant = await apiRequest(`/sessions/${code}/participants`, {
-            method: 'POST',
-            body: JSON.stringify({ name: name })
-        });
+        // --- Smart rejoin: check if this user was already in this session ---
+        let participant = null;
+        let wasRejoined = false;
+        
+        // 1. Check localStorage for a saved participant ID for this session
+        const history = getSessionHistory();
+        const savedEntry = history.find(h => h.code === code.toUpperCase());
+        if (savedEntry && savedEntry.participantId) {
+            participant = session.participants.find(p => p.id === savedEntry.participantId);
+            if (participant) wasRejoined = true;
+        }
+        
+        // 2. If not found by ID, check by exact name match (case-insensitive, non-host)
+        if (!participant) {
+            participant = session.participants.find(
+                p => !p.is_host && p.name.toLowerCase() === name.toLowerCase()
+            );
+            if (participant) wasRejoined = true;
+        }
+        
+        // 3. If still not found, create a new participant
+        if (!participant) {
+            participant = await apiRequest(`/sessions/${code}/participants`, {
+                method: 'POST',
+                body: JSON.stringify({ name: name })
+            });
+        }
         
         currentParticipant = participant;
         currentTipPercentage = participant.tip_percentage || 10;
         isHost = false;
         
+        // Save to session history for quick rejoin (use server name for consistency)
+        const host = session.participants.find(p => p.is_host);
+        saveSessionToHistory(code, participant.id, participant.name, host?.name || 'Unknown', false);
+        
         document.getElementById('participant-session-code').textContent = code;
-        document.getElementById('participant-name-display').textContent = name;
+        document.getElementById('participant-name-display').textContent = participant.name;
         
         await loadParticipantView();
         showPage('participant');
+        
+        if (wasRejoined) {
+            showToast('Welcome back! Your selections are preserved.', 'success');
+        }
         
     } catch (error) {
         showError('Failed to join session: ' + error.message);
@@ -496,71 +858,48 @@ async function removeParticipant(participantId) {
 let selectedFile = null;
 
 function setupUploadHandlers() {
-    const uploadArea = document.getElementById('upload-area');
     const fileInput = document.getElementById('receipt-input');
     const cameraInput = document.getElementById('camera-input');
     const cameraBtn = document.getElementById('camera-btn');
     const galleryBtn = document.getElementById('gallery-btn');
     const processBtn = document.getElementById('process-btn');
     const preview = document.getElementById('receipt-preview');
-    const placeholder = uploadArea.querySelector('.upload-placeholder');
-    
+
     // Camera button - opens camera on mobile
     cameraBtn.addEventListener('click', () => cameraInput.click());
-    
+
     // Gallery button - opens file picker
     galleryBtn.addEventListener('click', () => fileInput.click());
-    
-    // Upload area click also opens file picker
-    uploadArea.addEventListener('click', () => fileInput.click());
-    
-    uploadArea.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        uploadArea.classList.add('drag-over');
-    });
-    
-    uploadArea.addEventListener('dragleave', () => {
-        uploadArea.classList.remove('drag-over');
-    });
-    
-    uploadArea.addEventListener('drop', (e) => {
-        e.preventDefault();
-        uploadArea.classList.remove('drag-over');
-        if (e.dataTransfer.files.length) {
-            handleFileSelect(e.dataTransfer.files[0]);
-        }
-    });
-    
+
     fileInput.addEventListener('change', (e) => {
         if (e.target.files.length) {
             handleFileSelect(e.target.files[0]);
         }
     });
-    
+
     cameraInput.addEventListener('change', (e) => {
         if (e.target.files.length) {
             handleFileSelect(e.target.files[0]);
         }
     });
-    
+
     function handleFileSelect(file) {
         if (!file.type.match(/^image\/(jpeg|png|webp|heic|heif)$/i)) {
             showError('Please select a JPEG, PNG, WebP, or HEIC image');
             return;
         }
-        
+
         selectedFile = file;
         processBtn.disabled = false;
-        
+
         const reader = new FileReader();
         reader.onload = (e) => {
             preview.src = e.target.result;
             preview.hidden = false;
-            placeholder.hidden = true;
         };
         reader.readAsDataURL(file);
     }
-    
+
     processBtn.addEventListener('click', uploadReceipt);
 }
 
@@ -771,13 +1110,14 @@ function setupQRHandlers() {
     const showBtn = document.getElementById('show-qr-btn');
     const modal = document.getElementById('qr-modal');
     const closeBtn = modal.querySelector('.close-btn');
-    
+    const shareBtn = document.getElementById('share-link-btn');
+
     showBtn.addEventListener('click', async () => {
         try {
             const response = await fetch(`${API_BASE}/sessions/${currentSession.code}/qr`);
             const blob = await response.blob();
             const url = URL.createObjectURL(blob);
-            
+
             document.getElementById('qr-image').src = url;
             document.getElementById('qr-code-text').textContent = currentSession.code;
             modal.classList.add('active');
@@ -785,11 +1125,29 @@ function setupQRHandlers() {
             showError('Failed to load QR code');
         }
     });
-    
+
     closeBtn.addEventListener('click', () => modal.classList.remove('active'));
     modal.addEventListener('click', (e) => {
         if (e.target === modal) modal.classList.remove('active');
     });
+
+    // Share link handler
+    if (shareBtn && !shareBtn.dataset.bound) {
+        shareBtn.addEventListener('click', () => {
+            const url = `${window.location.origin}/?code=${currentSession.code}`;
+            if (navigator.share) {
+                navigator.share({
+                    title: 'Join my Check Splitter session',
+                    text: `Session code: ${currentSession.code}`,
+                    url
+                });
+            } else {
+                navigator.clipboard.writeText(url);
+                showToast('Session link copied!', 'success');
+            }
+        });
+        shareBtn.dataset.bound = 'true';
+    }
 }
 
 // Copy Code
@@ -825,15 +1183,19 @@ function setupEndSessionHandler() {
             'This will end the session for everyone. All participants will be returned to the home screen.',
             async () => {
                 try {
+                    const sessionCode = currentSession.code;
                     await apiRequest(`/sessions/${currentSession.code}`, {
                         method: 'DELETE'
                     });
                     stopSync();
+                    removeSessionFromHistory(sessionCode);
                     currentSession = null;
                     currentParticipant = null;
                     isHost = false;
                     showToast('Session ended', 'success');
                     showPage('landing');
+                    renderSessionHistory();
+                    renderRejoinBanner();
                 } catch (error) {
                     showError('Failed to end session: ' + error.message);
                 }
@@ -848,8 +1210,8 @@ async function loadParticipantView() {
         const session = await apiRequest(`/sessions/${currentSession.code}`);
         currentSession = session;
         
-        // Get all participants to show who selected what
-        const participants = await apiRequest(`/sessions/${currentSession.code}/participants`);
+        // Use participants from session data (no separate API call)
+        const participants = session.participants;
         
         const list = document.getElementById('participant-items-list');
         const items = session.items.filter(i => !i.is_tax && !i.is_tip_suggestion);
@@ -892,7 +1254,13 @@ async function loadParticipantView() {
             `;
         }).join('');
         
+        // Render discounts for participant view
+        renderParticipantDiscounts();
+        
         updateYourTotal();
+
+        // Setup participant code actions if not already
+        setupParticipantCodeActions();
         
     } catch (error) {
         showError('Failed to load items: ' + error.message);
@@ -928,6 +1296,112 @@ async function toggleItemSelection(itemId) {
 
 // Tip Selection
 function setupTipHandlers() {
+
+    // Participant code actions
+    function setupParticipantCodeActions() {
+        // Copy code
+        const copyBtn = document.getElementById('participant-copy-code-btn');
+        if (copyBtn && !copyBtn.dataset.bound) {
+            copyBtn.addEventListener('click', async () => {
+                try {
+                    await navigator.clipboard.writeText(currentSession.code);
+                    const textSpan = document.getElementById('participant-copy-btn-text');
+                    const originalText = textSpan.textContent;
+                    textSpan.textContent = 'Copied!';
+                    setTimeout(() => textSpan.textContent = originalText, 1500);
+                } catch (e) {
+                    const textSpan = document.getElementById('participant-copy-btn-text');
+                    const tempInput = document.createElement('input');
+                    tempInput.value = currentSession.code;
+                    document.body.appendChild(tempInput);
+                    tempInput.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(tempInput);
+                    textSpan.textContent = 'Copied!';
+                    setTimeout(() => textSpan.textContent = 'Copy Code', 1500);
+                }
+            });
+            copyBtn.dataset.bound = 'true';
+        }
+
+        // QR code
+        const qrBtn = document.getElementById('participant-show-qr-btn');
+        const qrModal = document.getElementById('participant-qr-modal');
+        const qrCloseBtn = document.getElementById('participant-qr-close-btn');
+        if (qrBtn && !qrBtn.dataset.bound) {
+            qrBtn.addEventListener('click', async () => {
+                try {
+                    const response = await fetch(`${API_BASE}/sessions/${currentSession.code}/qr`);
+                    const blob = await response.blob();
+                    const url = URL.createObjectURL(blob);
+                    document.getElementById('participant-qr-image').src = url;
+                    document.getElementById('participant-qr-code-text').textContent = currentSession.code;
+                    qrModal.classList.add('active');
+                } catch (error) {
+                    showError('Failed to load QR code');
+                }
+            });
+            qrBtn.dataset.bound = 'true';
+        }
+        if (qrCloseBtn && !qrCloseBtn.dataset.bound) {
+            qrCloseBtn.addEventListener('click', () => qrModal.classList.remove('active'));
+            qrCloseBtn.dataset.bound = 'true';
+        }
+        qrModal.addEventListener('click', (e) => {
+            if (e.target === qrModal) qrModal.classList.remove('active');
+        });
+
+        // Share link
+        const shareBtn = document.getElementById('participant-share-link-btn');
+        const shareModalBtn = document.getElementById('participant-share-link-modal-btn');
+        function shareSessionLink() {
+            const url = `${window.location.origin}/?code=${currentSession.code}`;
+            if (navigator.share) {
+                navigator.share({
+                    title: 'Join my Check Splitter session',
+                    text: `Session code: ${currentSession.code}`,
+                    url
+                });
+            } else {
+                navigator.clipboard.writeText(url);
+                showToast('Session link copied!', 'success');
+            }
+        }
+        if (shareBtn && !shareBtn.dataset.bound) {
+            shareBtn.addEventListener('click', shareSessionLink);
+            shareBtn.dataset.bound = 'true';
+        }
+        if (shareModalBtn && !shareModalBtn.dataset.bound) {
+            shareModalBtn.addEventListener('click', shareSessionLink);
+            shareModalBtn.dataset.bound = 'true';
+        }
+
+        // Leave session
+        const leaveBtn = document.getElementById('participant-leave-session-btn');
+        if (leaveBtn && !leaveBtn.dataset.bound) {
+            leaveBtn.addEventListener('click', () => {
+                showConfirm(
+                    'Leave Session',
+                    'Are you sure you want to leave? You can rejoin from the home screen.',
+                    async () => {
+                        try {
+                            stopSync();
+                            currentSession = null;
+                            currentParticipant = null;
+                            isHost = false;
+                            showToast('You left the session', 'success');
+                            showPage('landing');
+                            renderSessionHistory();
+                            renderRejoinBanner();
+                        } catch (error) {
+                            showError('Failed to leave session: ' + error.message);
+                        }
+                    }
+                );
+            });
+            leaveBtn.dataset.bound = 'true';
+        }
+    }
     // Participant tip buttons
     const participantTipBtns = document.querySelectorAll('#participant-page .tip-btn');
     const customInput = document.getElementById('custom-tip-value');
@@ -1007,6 +1481,47 @@ async function updateTip(percentage) {
 }
 
 function updateYourTotal() {
+    // Use server-calculated summary for accurate totals including discounts
+    updateYourTotalFromServer();
+}
+
+async function updateYourTotalFromServer() {
+    try {
+        const summary = await apiRequest(`/sessions/${currentSession.code}/summary`);
+        
+        // Find my summary in the response
+        const mySummary = summary.participants.find(p => p.participant_id === currentParticipant.id);
+        
+        if (mySummary) {
+            // Update display with server-calculated values
+            document.getElementById('your-items-total').textContent = formatCurrency(mySummary.items_subtotal);
+            document.getElementById('your-tax').textContent = formatCurrency(mySummary.tax_share);
+            document.getElementById('your-tip').textContent = formatCurrency(mySummary.tip_amount);
+            document.getElementById('tip-percent-display').textContent = currentTipPercentage;
+            document.getElementById('your-grand-total').textContent = formatCurrency(mySummary.total);
+            
+            // Show discount row if there's a discount
+            const discountRow = document.getElementById('your-discount-row');
+            const discountAmount = document.getElementById('your-discount');
+            
+            if (mySummary.discount_amount && mySummary.discount_amount > 0) {
+                discountRow.style.display = 'flex';
+                discountAmount.textContent = '-' + formatCurrency(mySummary.discount_amount);
+            } else {
+                discountRow.style.display = 'none';
+            }
+        } else {
+            // Fallback to local calculation if not in summary
+            updateYourTotalLocal();
+        }
+    } catch (error) {
+        // Fallback to local calculation if API fails
+        updateYourTotalLocal();
+    }
+}
+
+function updateYourTotalLocal() {
+    // Local calculation fallback (without discounts)
     const items = currentSession.items.filter(i => !i.is_tax && !i.is_tip_suggestion);
     const taxItem = currentSession.items.find(i => i.is_tax);
     
@@ -1042,37 +1557,38 @@ function updateYourTotal() {
     document.getElementById('your-tip').textContent = formatCurrency(tip);
     document.getElementById('tip-percent-display').textContent = tipPercentage;
     document.getElementById('your-grand-total').textContent = formatCurrency(grandTotal);
+    
+    // Hide discount row for local calculation
+    const discountRow = document.getElementById('your-discount-row');
+    if (discountRow) discountRow.style.display = 'none';
 }
 
 // Discounts Management
 function toggleDiscountsSection() {
     const section = document.getElementById('discounts-section');
     const content = document.getElementById('discount-content');
-    const isExpanded = section.classList.contains('expanded');
+    const chevron = section.querySelector('.discount-chevron');
+    const hint = section.querySelector('.discount-hint');
     
-    if (isExpanded) {
-        section.classList.remove('expanded');
-        content.hidden = true;
-    } else {
-        section.classList.add('expanded');
-        content.hidden = false;
-    }
+    const isExpanded = !content.hidden;
+    content.hidden = isExpanded;
+    chevron.textContent = isExpanded ? '▸' : '▾';
+    if (hint) hint.textContent = isExpanded ? 'Tap to expand' : 'Tap to collapse';
 }
 
-// Render discounts from session data (no separate API call)
 function renderDiscountsList() {
-    if (!currentSession || !isHost) return;
+    if (!currentSession) return;
     
     const discounts = currentSession.discounts || [];
     const list = document.getElementById('discounts-list');
     const count = document.getElementById('discounts-count');
     
-    if (!list || !count) return;
+    if (count) count.textContent = discounts.length;
     
-    count.textContent = discounts.length;
+    if (!list) return;
     
     if (discounts.length === 0) {
-        list.innerHTML = '';
+        list.innerHTML = '<p class="help-text">No discounts added yet</p>';
         return;
     }
     
@@ -1310,13 +1826,35 @@ document.addEventListener('DOMContentLoaded', () => {
     // Fetch nearby sessions on page load
     fetchNearbySessions();
     
-    // Check for session code in URL (from QR code scan)
+    // --- Auto-rejoin logic ---
     const urlParams = new URLSearchParams(window.location.search);
     const codeFromUrl = urlParams.get('code');
+    const lastSession = getLastSession();
+    
     if (codeFromUrl) {
-        document.getElementById('session-code').value = codeFromUrl.toUpperCase();
-        document.getElementById('join-name').focus();
-        // Scroll to join form
-        document.querySelector('.card-secondary')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // QR code / link join: check if we have a saved identity for this session
+        const codeUpper = codeFromUrl.toUpperCase();
+        const history = getSessionHistory();
+        const savedEntry = history.find(h => h.code === codeUpper);
+        
+        if (savedEntry && savedEntry.participantId) {
+            // We were in this session before — auto-rejoin (works for host + guest)
+            rejoinSession(codeUpper);
+        } else {
+            // New session for this user — pre-fill code, let them type their name
+            document.getElementById('session-code').value = codeUpper;
+            document.getElementById('join-name').focus();
+            document.querySelector('.card-secondary')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            renderRejoinBanner();
+            renderSessionHistory();
+        }
+    } else if (lastSession && (Date.now() - lastSession.timestamp < 5 * 60 * 1000)) {
+        // Last session was active within 5 minutes — likely an accidental refresh
+        // Auto-rejoin immediately (works for both host and guest via rejoinSession)
+        rejoinSession(lastSession.code);
+    } else {
+        // Normal landing page
+        renderRejoinBanner();
+        renderSessionHistory();
     }
 });

@@ -4,11 +4,12 @@ Participants API routes.
 Handles participant management for sessions.
 """
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.websocket_manager import manager
 from app.models.session import Session
 from app.models.participant import Participant
 from app.schemas.participant import ParticipantCreate, ParticipantUpdate, ParticipantResponse
@@ -40,6 +41,7 @@ async def list_participants(
 async def join_session(
     code: str,
     participant_data: ParticipantCreate,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db)
 ):
     """Join a session as a new participant."""
@@ -55,6 +57,9 @@ async def join_session(
     await db.commit()
     await db.refresh(participant)
     
+    # Notify all connected clients
+    background_tasks.add_task(manager.notify_session_update, code.upper())
+    
     return participant
 
 
@@ -63,6 +68,7 @@ async def update_participant(
     code: str,
     participant_id: str,
     participant_data: ParticipantUpdate,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db)
 ):
     """Update a participant's details (name, tip)."""
@@ -91,6 +97,9 @@ async def update_participant(
     await db.commit()
     await db.refresh(participant)
     
+    # Notify all connected clients
+    background_tasks.add_task(manager.notify_session_update, code.upper())
+    
     return participant
 
 
@@ -98,6 +107,7 @@ async def update_participant(
 async def leave_session(
     code: str,
     participant_id: str,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db)
 ):
     """Remove a participant from the session."""
@@ -122,3 +132,6 @@ async def leave_session(
     
     await db.delete(participant)
     await db.commit()
+    
+    # Notify all connected clients
+    background_tasks.add_task(manager.notify_session_update, code.upper())
