@@ -112,11 +112,12 @@ Return ONLY valid JSON, no other text."""
         # Get Gemini client
         model = self._get_client()
         
-        # Call Gemini with the image
-        response = model.generate_content([
-            self.RECEIPT_PROMPT,
-            image
-        ])
+        # Call Gemini with the image (run in thread to avoid blocking event loop)
+        import asyncio
+        response = await asyncio.to_thread(
+            model.generate_content,
+            [self.RECEIPT_PROMPT, image]
+        )
         
         # Parse the JSON response
         try:

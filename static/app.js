@@ -28,9 +28,10 @@ const IDLE_THRESHOLD = 30000;        // 30 seconds to consider idle
 // Session History (localStorage)
 const SESSION_HISTORY_KEY = 'checkSplitter_sessionHistory';
 const LAST_SESSION_KEY = 'checkSplitter_lastSession';
+const HOST_TOKEN_KEY = 'checkSplitter_hostToken';  // Host token for current session
 const MAX_HISTORY_ITEMS = 10;
 
-function saveSessionToHistory(code, participantId, participantName, hostName, isHostFlag) {
+function saveSessionToHistory(code, participantId, participantName, hostName, isHostFlag, hostToken = null) {
     const entry = {
         code: code.toUpperCase(),
         participantId,
@@ -42,6 +43,13 @@ function saveSessionToHistory(code, participantId, participantName, hostName, is
     
     // Save as last session for quick rejoin
     localStorage.setItem(LAST_SESSION_KEY, JSON.stringify(entry));
+    
+    // If host, store the host token separately (keyed by session code)
+    if (isHostFlag && hostToken) {
+        const tokens = getHostTokens();
+        tokens[code.toUpperCase()] = hostToken;
+        localStorage.setItem(HOST_TOKEN_KEY, JSON.stringify(tokens));
+    }
     
     // Add to history (dedup by code)
     let history = getSessionHistory();
@@ -55,6 +63,23 @@ function getSessionHistory() {
     try {
         return JSON.parse(localStorage.getItem(SESSION_HISTORY_KEY)) || [];
     } catch { return []; }
+}
+
+function getHostTokens() {
+    try {
+        return JSON.parse(localStorage.getItem(HOST_TOKEN_KEY)) || {};
+    } catch { return {}; }
+}
+
+function getHostToken(code) {
+    const tokens = getHostTokens();
+    return tokens[code?.toUpperCase()] || null;
+}
+
+function removeHostToken(code) {
+    const tokens = getHostTokens();
+    delete tokens[code?.toUpperCase()];
+    localStorage.setItem(HOST_TOKEN_KEY, JSON.stringify(tokens));
 }
 
 function getLastSession() {
@@ -87,6 +112,9 @@ function removeSessionFromHistory(code) {
     if (last && last.code === code) {
         clearLastSession();
     }
+    
+    // Also remove host token if present
+    removeHostToken(code);
 }
 
 async function rejoinSession(code) {
@@ -342,7 +370,7 @@ function connectWebSocket() {
             if (wsPingInterval) clearInterval(wsPingInterval);
             wsPingInterval = setInterval(() => {
                 if (websocket && websocket.readyState === WebSocket.OPEN) {
-                    websocket.send(JSON.stringify({ type: 'ping' }));
+                    websocket.send('ping');
                 }
             }, 30000); // Ping every 30 seconds
         };
@@ -520,11 +548,12 @@ async function updateSummary() {
         }
         
         // Add unassigned items warning if any
-        if (summary.unassigned_total > 0) {
+        const unassignedTotal = (summary.unassigned_items || []).reduce((sum, item) => sum + parseFloat(item.price || 0), 0);
+        if (unassignedTotal > 0) {
             content.innerHTML += `
                 <div class="summary-row" style="border: 1px solid var(--accent);">
-                    <span class="name">⚠️ Unassigned Items</span>
-                    <span class="amount" style="color: var(--accent);">${formatCurrency(summary.unassigned_total)}</span>
+                    <span class="name">⚠️ Unassigned Items (${summary.unassigned_items.length})</span>
+                    <span class="amount" style="color: var(--accent);">${formatCurrency(unassignedTotal)}</span>
                 </div>
             `;
         }
@@ -556,12 +585,23 @@ async function fetchUserCurrency() {
 }
 
 async function apiRequest(endpoint, options = {}) {
+    const headers = {
+        'Content-Type': 'application/json',
+        ...options.headers
+    };
+    
+    // Automatically include host token for host-only operations
+    // This applies when the user is a host and has a token stored
+    if (isHost && currentSession) {
+        const hostToken = getHostToken(currentSession.code);
+        if (hostToken) {
+            headers['X-Host-Token'] = hostToken;
+        }
+    }
+    
     const response = await fetch(API_BASE + endpoint, {
-        headers: {
-            'Content-Type': 'application/json',
-            ...options.headers
-        },
-        ...options
+        ...options,
+        headers
     });
     
     if (!response.ok) {
@@ -647,8 +687,8 @@ async function createSession(hostName) {
         currentParticipant = session.participants.find(p => p.is_host);
         currentTipPercentage = currentParticipant?.tip_percentage || 10;
         
-        // Save to session history for quick rejoin
-        saveSessionToHistory(session.code, currentParticipant?.id, hostName, hostName, true);
+        // Save to session history for quick rejoin (include host token)
+        saveSessionToHistory(session.code, currentParticipant?.id, hostName, hostName, true, session.host_token);
         
         await loadSession(session.code);
         
@@ -917,8 +957,18 @@ async function uploadReceipt() {
         const formData = new FormData();
         formData.append('file', selectedFile);
         
+        // Include host token for upload (host-only operation)
+        const headers = {};
+        if (isHost && currentSession) {
+            const hostToken = getHostToken(currentSession.code);
+            if (hostToken) {
+                headers['X-Host-Token'] = hostToken;
+            }
+        }
+        
         const response = await fetch(`${API_BASE}/sessions/${currentSession.code}/receipt`, {
             method: 'POST',
+            headers,
             body: formData
         });
         
@@ -1067,8 +1117,8 @@ function updateHostTotal() {
         myTax = (myItemsTotal / totalAssignedValue) * taxItem.price;
     }
     
-    // Calculate tip
-    const tipAmount = (myItemsTotal + myTax) * (currentTipPercentage / 100);
+    // Calculate tip on items only (consistent with server calculator)
+    const tipAmount = myItemsTotal * (currentTipPercentage / 100);
     const grandTotal = myItemsTotal + myTax + tipAmount;
     
     document.getElementById('host-items-total').textContent = formatCurrency(myItemsTotal);
@@ -1294,114 +1344,155 @@ async function toggleItemSelection(itemId) {
     }
 }
 
-// Tip Selection
-function setupTipHandlers() {
+// Participant Discounts (read-only view for participants)
+function renderParticipantDiscounts() {
+    if (!currentSession) return;
+    
+    const discounts = currentSession.discounts || [];
+    const section = document.getElementById('participant-discounts-section');
+    if (!section) return;
+    
+    if (discounts.length === 0) {
+        section.hidden = true;
+        return;
+    }
+    
+    section.hidden = false;
+    const list = section.querySelector('.participant-discounts-list');
+    if (!list) return;
+    
+    list.innerHTML = discounts.map(d => {
+        const targetName = d.participant_id 
+            ? currentSession.participants.find(p => p.id === d.participant_id)?.name || 'Unknown'
+            : 'Everyone';
+        const valueDisplay = d.discount_type === 'percentage' 
+            ? `${d.value}%` 
+            : formatCurrency(d.value);
+        
+        return `
+            <div class="discount-item readonly">
+                <div class="discount-item-info">
+                    <div class="discount-item-name">${d.name}</div>
+                    <div class="discount-item-meta">
+                        <span class="discount-item-value">${valueDisplay} off</span>
+                        <span class="discount-item-target">→ ${targetName}</span>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
 
-    // Participant code actions
-    function setupParticipantCodeActions() {
-        // Copy code
-        const copyBtn = document.getElementById('participant-copy-code-btn');
-        if (copyBtn && !copyBtn.dataset.bound) {
-            copyBtn.addEventListener('click', async () => {
-                try {
-                    await navigator.clipboard.writeText(currentSession.code);
-                    const textSpan = document.getElementById('participant-copy-btn-text');
-                    const originalText = textSpan.textContent;
-                    textSpan.textContent = 'Copied!';
-                    setTimeout(() => textSpan.textContent = originalText, 1500);
-                } catch (e) {
-                    const textSpan = document.getElementById('participant-copy-btn-text');
-                    const tempInput = document.createElement('input');
-                    tempInput.value = currentSession.code;
-                    document.body.appendChild(tempInput);
-                    tempInput.select();
-                    document.execCommand('copy');
-                    document.body.removeChild(tempInput);
-                    textSpan.textContent = 'Copied!';
-                    setTimeout(() => textSpan.textContent = 'Copy Code', 1500);
-                }
-            });
-            copyBtn.dataset.bound = 'true';
-        }
+// Participant code actions (extracted to module scope so loadParticipantView can call it)
+function setupParticipantCodeActions() {
+    // Copy code
+    const copyBtn = document.getElementById('participant-copy-code-btn');
+    if (copyBtn && !copyBtn.dataset.bound) {
+        copyBtn.addEventListener('click', async () => {
+            try {
+                await navigator.clipboard.writeText(currentSession.code);
+                const textSpan = document.getElementById('participant-copy-btn-text');
+                const originalText = textSpan.textContent;
+                textSpan.textContent = 'Copied!';
+                setTimeout(() => textSpan.textContent = originalText, 1500);
+            } catch (e) {
+                const textSpan = document.getElementById('participant-copy-btn-text');
+                const tempInput = document.createElement('input');
+                tempInput.value = currentSession.code;
+                document.body.appendChild(tempInput);
+                tempInput.select();
+                document.execCommand('copy');
+                document.body.removeChild(tempInput);
+                textSpan.textContent = 'Copied!';
+                setTimeout(() => textSpan.textContent = 'Copy Code', 1500);
+            }
+        });
+        copyBtn.dataset.bound = 'true';
+    }
 
-        // QR code
-        const qrBtn = document.getElementById('participant-show-qr-btn');
-        const qrModal = document.getElementById('participant-qr-modal');
-        const qrCloseBtn = document.getElementById('participant-qr-close-btn');
-        if (qrBtn && !qrBtn.dataset.bound) {
-            qrBtn.addEventListener('click', async () => {
-                try {
-                    const response = await fetch(`${API_BASE}/sessions/${currentSession.code}/qr`);
-                    const blob = await response.blob();
-                    const url = URL.createObjectURL(blob);
-                    document.getElementById('participant-qr-image').src = url;
-                    document.getElementById('participant-qr-code-text').textContent = currentSession.code;
-                    qrModal.classList.add('active');
-                } catch (error) {
-                    showError('Failed to load QR code');
-                }
-            });
-            qrBtn.dataset.bound = 'true';
-        }
-        if (qrCloseBtn && !qrCloseBtn.dataset.bound) {
-            qrCloseBtn.addEventListener('click', () => qrModal.classList.remove('active'));
-            qrCloseBtn.dataset.bound = 'true';
-        }
+    // QR code
+    const qrBtn = document.getElementById('participant-show-qr-btn');
+    const qrModal = document.getElementById('participant-qr-modal');
+    const qrCloseBtn = document.getElementById('participant-qr-close-btn');
+    if (qrBtn && !qrBtn.dataset.bound) {
+        qrBtn.addEventListener('click', async () => {
+            try {
+                const response = await fetch(`${API_BASE}/sessions/${currentSession.code}/qr`);
+                const blob = await response.blob();
+                const url = URL.createObjectURL(blob);
+                document.getElementById('participant-qr-image').src = url;
+                document.getElementById('participant-qr-code-text').textContent = currentSession.code;
+                qrModal.classList.add('active');
+            } catch (error) {
+                showError('Failed to load QR code');
+            }
+        });
+        qrBtn.dataset.bound = 'true';
+    }
+    if (qrCloseBtn && !qrCloseBtn.dataset.bound) {
+        qrCloseBtn.addEventListener('click', () => qrModal.classList.remove('active'));
+        qrCloseBtn.dataset.bound = 'true';
+    }
+    if (qrModal) {
         qrModal.addEventListener('click', (e) => {
             if (e.target === qrModal) qrModal.classList.remove('active');
         });
+    }
 
-        // Share link
-        const shareBtn = document.getElementById('participant-share-link-btn');
-        const shareModalBtn = document.getElementById('participant-share-link-modal-btn');
-        function shareSessionLink() {
-            const url = `${window.location.origin}/?code=${currentSession.code}`;
-            if (navigator.share) {
-                navigator.share({
-                    title: 'Join my Check Splitter session',
-                    text: `Session code: ${currentSession.code}`,
-                    url
-                });
-            } else {
-                navigator.clipboard.writeText(url);
-                showToast('Session link copied!', 'success');
-            }
-        }
-        if (shareBtn && !shareBtn.dataset.bound) {
-            shareBtn.addEventListener('click', shareSessionLink);
-            shareBtn.dataset.bound = 'true';
-        }
-        if (shareModalBtn && !shareModalBtn.dataset.bound) {
-            shareModalBtn.addEventListener('click', shareSessionLink);
-            shareModalBtn.dataset.bound = 'true';
-        }
-
-        // Leave session
-        const leaveBtn = document.getElementById('participant-leave-session-btn');
-        if (leaveBtn && !leaveBtn.dataset.bound) {
-            leaveBtn.addEventListener('click', () => {
-                showConfirm(
-                    'Leave Session',
-                    'Are you sure you want to leave? You can rejoin from the home screen.',
-                    async () => {
-                        try {
-                            stopSync();
-                            currentSession = null;
-                            currentParticipant = null;
-                            isHost = false;
-                            showToast('You left the session', 'success');
-                            showPage('landing');
-                            renderSessionHistory();
-                            renderRejoinBanner();
-                        } catch (error) {
-                            showError('Failed to leave session: ' + error.message);
-                        }
-                    }
-                );
+    // Share link
+    const shareBtn = document.getElementById('participant-share-link-btn');
+    const shareModalBtn = document.getElementById('participant-share-link-modal-btn');
+    function shareSessionLink() {
+        const url = `${window.location.origin}/?code=${currentSession.code}`;
+        if (navigator.share) {
+            navigator.share({
+                title: 'Join my Check Splitter session',
+                text: `Session code: ${currentSession.code}`,
+                url
             });
-            leaveBtn.dataset.bound = 'true';
+        } else {
+            navigator.clipboard.writeText(url);
+            showToast('Session link copied!', 'success');
         }
     }
+    if (shareBtn && !shareBtn.dataset.bound) {
+        shareBtn.addEventListener('click', shareSessionLink);
+        shareBtn.dataset.bound = 'true';
+    }
+    if (shareModalBtn && !shareModalBtn.dataset.bound) {
+        shareModalBtn.addEventListener('click', shareSessionLink);
+        shareModalBtn.dataset.bound = 'true';
+    }
+
+    // Leave session
+    const leaveBtn = document.getElementById('participant-leave-session-btn');
+    if (leaveBtn && !leaveBtn.dataset.bound) {
+        leaveBtn.addEventListener('click', () => {
+            showConfirm(
+                'Leave Session',
+                'Are you sure you want to leave? You can rejoin from the home screen.',
+                async () => {
+                    try {
+                        stopSync();
+                        currentSession = null;
+                        currentParticipant = null;
+                        isHost = false;
+                        showToast('You left the session', 'success');
+                        showPage('landing');
+                        renderSessionHistory();
+                        renderRejoinBanner();
+                    } catch (error) {
+                        showError('Failed to leave session: ' + error.message);
+                    }
+                }
+            );
+        });
+        leaveBtn.dataset.bound = 'true';
+    }
+}
+
+// Tip Selection
+function setupTipHandlers() {
     // Participant tip buttons
     const participantTipBtns = document.querySelectorAll('#participant-page .tip-btn');
     const customInput = document.getElementById('custom-tip-value');

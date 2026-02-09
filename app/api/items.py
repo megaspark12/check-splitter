@@ -13,27 +13,18 @@ from app.websocket_manager import manager
 from app.models.session import Session
 from app.models.item import Item
 from app.schemas.item import ItemCreate, ItemUpdate, ItemResponse
-from app.services.session_service import SessionService
+from app.api.dependencies import get_session_or_404, require_host_token
 
 router = APIRouter(prefix="/api/sessions/{code}/items", tags=["items"])
-
-
-async def get_session_or_404(code: str, db: AsyncSession) -> Session:
-    """Get a session by code or raise 404."""
-    service = SessionService(db)
-    session = await service.get_session_by_code(code)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
-    return session
 
 
 @router.get("", response_model=List[ItemResponse])
 async def list_items(
     code: str,
+    session: Session = Depends(get_session_or_404),
     db: AsyncSession = Depends(get_db)
 ):
     """List all items in a session."""
-    session = await get_session_or_404(code, db)
     return session.items
 
 
@@ -42,10 +33,10 @@ async def create_item(
     code: str,
     item_data: ItemCreate,
     background_tasks: BackgroundTasks,
+    session: Session = Depends(require_host_token),
     db: AsyncSession = Depends(get_db)
 ):
-    """Add an item to a session."""
-    session = await get_session_or_404(code, db)
+    """Add an item to a session. Requires host token."""
     
     # Get next position
     max_position = max((i.position for i in session.items), default=-1)
@@ -76,10 +67,10 @@ async def update_item(
     item_id: str,
     item_data: ItemUpdate,
     background_tasks: BackgroundTasks,
+    session: Session = Depends(require_host_token),
     db: AsyncSession = Depends(get_db)
 ):
-    """Update an item."""
-    session = await get_session_or_404(code, db)
+    """Update an item. Requires host token."""
     
     # Find the item
     result = await db.execute(
@@ -119,10 +110,10 @@ async def delete_item(
     code: str,
     item_id: str,
     background_tasks: BackgroundTasks,
+    session: Session = Depends(require_host_token),
     db: AsyncSession = Depends(get_db)
 ):
-    """Delete an item."""
-    session = await get_session_or_404(code, db)
+    """Delete an item. Requires host token."""
     
     result = await db.execute(
         select(Item).where(

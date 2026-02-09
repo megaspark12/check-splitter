@@ -85,6 +85,7 @@ class SessionResponse(BaseModel):
     items: List[ItemInSession] = []
     participants: List[ParticipantInSession] = []
     discounts: List[DiscountInSession] = []
+    host_token: Optional[str] = None  # Only returned on session creation
     
     class Config:
         from_attributes = True

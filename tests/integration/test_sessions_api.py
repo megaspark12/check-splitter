@@ -167,7 +167,9 @@ class TestSessionSummary:
             "/api/sessions",
             json={"host_name": "Alice"}
         )
-        session_code = create_response.json()["code"]
+        session_data = create_response.json()
+        session_code = session_data["code"]
+        host_token = session_data["host_token"]
         
         # Add another participant
         await client.post(
@@ -175,16 +177,18 @@ class TestSessionSummary:
             json={"name": "Bob"}
         )
         
-        # Add items
+        # Add items (requires host token)
         burger_response = await client.post(
             f"/api/sessions/{session_code}/items",
-            json={"name": "Burger", "price": "15.00"}
+            json={"name": "Burger", "price": "15.00"},
+            headers={"X-Host-Token": host_token}
         )
         burger_id = burger_response.json()["id"]
         
         salad_response = await client.post(
             f"/api/sessions/{session_code}/items",
-            json={"name": "Salad", "price": "12.00"}
+            json={"name": "Salad", "price": "12.00"},
+            headers={"X-Host-Token": host_token}
         )
         salad_id = salad_response.json()["id"]
         
@@ -250,10 +254,15 @@ class TestSessionDeletion:
             "/api/sessions",
             json={"host_name": "Alice"}
         )
-        session_code = create_response.json()["code"]
+        session_data = create_response.json()
+        session_code = session_data["code"]
+        host_token = session_data["host_token"]
         
-        # Delete session
-        response = await client.delete(f"/api/sessions/{session_code}")
+        # Delete session (requires host token)
+        response = await client.delete(
+            f"/api/sessions/{session_code}",
+            headers={"X-Host-Token": host_token}
+        )
         
         assert response.status_code == 204
         
@@ -292,12 +301,15 @@ class TestReceiptUpload:
             "/api/sessions",
             json={"host_name": "Alice"}
         )
-        session_code = create_response.json()["code"]
+        session_data = create_response.json()
+        session_code = session_data["code"]
+        host_token = session_data["host_token"]
         
-        # Try to upload a text file
+        # Try to upload a text file (requires host token)
         response = await client.post(
             f"/api/sessions/{session_code}/receipt",
-            files={"file": ("receipt.txt", b"not an image", "text/plain")}
+            files={"file": ("receipt.txt", b"not an image", "text/plain")},
+            headers={"X-Host-Token": host_token}
         )
         
         assert response.status_code == 400

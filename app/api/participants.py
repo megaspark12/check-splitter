@@ -13,27 +13,18 @@ from app.websocket_manager import manager
 from app.models.session import Session
 from app.models.participant import Participant
 from app.schemas.participant import ParticipantCreate, ParticipantUpdate, ParticipantResponse
-from app.services.session_service import SessionService
+from app.api.dependencies import get_session_or_404, require_host_token
 
 router = APIRouter(prefix="/api/sessions/{code}/participants", tags=["participants"])
-
-
-async def get_session_or_404(code: str, db: AsyncSession) -> Session:
-    """Get a session by code or raise 404."""
-    service = SessionService(db)
-    session = await service.get_session_by_code(code)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
-    return session
 
 
 @router.get("", response_model=List[ParticipantResponse])
 async def list_participants(
     code: str,
+    session: Session = Depends(get_session_or_404),
     db: AsyncSession = Depends(get_db)
 ):
     """List all participants in a session."""
-    session = await get_session_or_404(code, db)
     return session.participants
 
 
@@ -42,10 +33,10 @@ async def join_session(
     code: str,
     participant_data: ParticipantCreate,
     background_tasks: BackgroundTasks,
+    session: Session = Depends(get_session_or_404),
     db: AsyncSession = Depends(get_db)
 ):
     """Join a session as a new participant."""
-    session = await get_session_or_404(code, db)
     
     participant = Participant(
         session_id=session.id,
@@ -69,10 +60,10 @@ async def update_participant(
     participant_id: str,
     participant_data: ParticipantUpdate,
     background_tasks: BackgroundTasks,
+    session: Session = Depends(get_session_or_404),
     db: AsyncSession = Depends(get_db)
 ):
     """Update a participant's details (name, tip)."""
-    session = await get_session_or_404(code, db)
     
     result = await db.execute(
         select(Participant).where(
@@ -108,10 +99,10 @@ async def leave_session(
     code: str,
     participant_id: str,
     background_tasks: BackgroundTasks,
+    session: Session = Depends(require_host_token),
     db: AsyncSession = Depends(get_db)
 ):
-    """Remove a participant from the session."""
-    session = await get_session_or_404(code, db)
+    """Remove a participant from the session. Requires host token."""
     
     result = await db.execute(
         select(Participant).where(

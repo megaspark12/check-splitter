@@ -9,7 +9,7 @@ import uuid
 import hashlib
 import aiofiles
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile, File, Request, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
@@ -25,6 +25,7 @@ from app.services.calculator import BillCalculator
 from app.services.ocr_service import OCRService
 from app.models.item import Item
 from app.models.session import Session, SessionStatus
+from app.api.dependencies import require_host_token, get_session_or_404
 from app.websocket_manager import manager
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
@@ -99,7 +100,7 @@ async def get_nearby_sessions(
         select(Session)
         .options(selectinload(Session.participants))
         .where(Session.network_hash == network_hash)
-        .where(Session.expires_at > datetime.utcnow())
+        .where(Session.expires_at > datetime.now(timezone.utc))
         .where(Session.status != SessionStatus.COMPLETED)
         .order_by(Session.created_at.desc())
     )
@@ -131,31 +132,31 @@ async def create_session(
     """Create a new session and add the host as the first participant."""
     network_hash = get_client_network_hash(request)
     service = SessionService(db)
-    session = await service.create_session(session_data.host_name, network_hash=network_hash)
-    return session
+    session, host_token = await service.create_session(session_data.host_name, network_hash=network_hash)
+    
+    # Build response with host_token included (only on creation)
+    response_data = SessionResponse.model_validate(session)
+    response_data.host_token = host_token
+    return response_data
 
 
 @router.get("/{code}", response_model=SessionResponse)
 async def get_session(
     code: str,
+    session: Session = Depends(get_session_or_404),
     db: AsyncSession = Depends(get_db)
 ):
     """Get a session by its code."""
-    service = SessionService(db)
-    session = await service.get_session_by_code(code)
-    
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
-    
     return session
 
 
 @router.delete("/{code}", status_code=204)
 async def delete_session(
     code: str,
+    session: Session = Depends(require_host_token),
     db: AsyncSession = Depends(get_db)
 ):
-    """Delete a session."""
+    """Delete a session. Requires host token."""
     service = SessionService(db)
     deleted = await service.delete_session(code)
     
@@ -168,11 +169,12 @@ async def delete_session(
 @router.post("/{code}/receipt")
 async def upload_receipt(
     code: str,
+    session: Session = Depends(require_host_token),
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Upload a receipt image and extract items using OCR.
+    Upload a receipt image and extract items using OCR. Requires host token.
     
     This will:
     1. Save the image
@@ -181,11 +183,8 @@ async def upload_receipt(
     4. Add the items to the session
     """
     settings = get_settings()
-    service = SessionService(db)
-    session = await service.get_session_by_code(code)
     
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+    # Session is already validated by require_host_token dependency
     
     # Validate file type
     allowed_types = ["image/jpeg", "image/png", "image/webp"]
@@ -306,6 +305,9 @@ async def upload_receipt(
         
         session.status = SessionStatus.READY
         await db.commit()
+        
+        # Notify all connected clients about new items
+        await manager.notify_session_update(code.upper())
         
         return {
             "message": "Receipt processed successfully",

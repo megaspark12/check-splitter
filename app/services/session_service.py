@@ -4,9 +4,10 @@ Session management service.
 Handles session creation, retrieval, and management.
 """
 import random
+import secrets
 import string
-from datetime import datetime, timedelta
-from typing import Optional
+from datetime import datetime, timedelta, timezone
+from typing import Optional, Tuple
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -43,7 +44,7 @@ class SessionService:
                 return code
         raise RuntimeError("Could not generate unique session code")
     
-    async def create_session(self, host_name: str, network_hash: str = None) -> Session:
+    async def create_session(self, host_name: str, network_hash: str = None) -> Tuple[Session, str]:
         """
         Create a new session with the host as the first participant.
         
@@ -52,19 +53,23 @@ class SessionService:
             network_hash: Hash of the client's network for nearby detection
             
         Returns:
-            The created Session object
+            Tuple of (Session object, plain-text host token)
         """
         code = await self.generate_unique_code()
         
-        expires_at = datetime.utcnow() + timedelta(
+        expires_at = datetime.now(timezone.utc) + timedelta(
             minutes=self.settings.session_expiry_minutes
         )
+        
+        # Generate a secure host token
+        host_token = secrets.token_urlsafe(32)
         
         session = Session(
             code=code,
             status=SessionStatus.PENDING,
             network_hash=network_hash,
             expires_at=expires_at,
+            host_token_hash=Session.hash_token(host_token),
         )
         
         self.db.add(session)
@@ -90,7 +95,7 @@ class SessionService:
             .options(selectinload(Session.discounts))
         )
         result = await self.db.execute(stmt)
-        return result.scalar_one()
+        return result.scalar_one(), host_token
     
     async def get_session_by_code(self, code: str) -> Optional[Session]:
         """

@@ -3,8 +3,9 @@ Discounts API routes.
 
 Handles discount creation, updates, and deletion for sessions.
 """
+from datetime import datetime, timezone
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, Header, HTTPException, BackgroundTasks
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -20,15 +21,35 @@ router = APIRouter(prefix="/api/sessions/{session_code}/discounts", tags=["disco
 
 
 async def get_session_by_code(db: AsyncSession, code: str) -> Session:
-    """Get session by code with discounts loaded."""
+    """Get session by code with discounts loaded. Checks expiry."""
     result = await db.execute(
         select(Session)
         .options(selectinload(Session.discounts).selectinload(Discount.participant))
-        .where(Session.code == code)
+        .where(Session.code == code.upper())
     )
     session = result.scalar_one_or_none()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+    if session.expires_at:
+        now = datetime.now(timezone.utc)
+        # Handle both naive and aware datetimes
+        expires_at = session.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at < now:
+            raise HTTPException(status_code=410, detail="Session has expired")
+    return session
+
+
+async def get_session_with_host_auth(
+    db: AsyncSession, code: str, x_host_token: str = None
+) -> Session:
+    """Get session by code, validate host token. For destructive operations."""
+    session = await get_session_by_code(db, code)
+    if not x_host_token:
+        raise HTTPException(status_code=401, detail="Host token required")
+    if not session.verify_host_token(x_host_token):
+        raise HTTPException(status_code=403, detail="Invalid host token")
     return session
 
 
@@ -59,10 +80,11 @@ async def create_discount(
     session_code: str,
     discount_data: DiscountCreate,
     background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    x_host_token: str = Header(default=None),
 ):
-    """Create a new discount for a session."""
-    session = await get_session_by_code(db, session_code)
+    """Create a new discount for a session. Requires host token."""
+    session = await get_session_with_host_auth(db, session_code, x_host_token)
     
     # Validate participant_id if provided
     participant = None
@@ -123,10 +145,11 @@ async def update_discount(
     discount_id: str,
     discount_data: DiscountUpdate,
     background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    x_host_token: str = Header(default=None),
 ):
-    """Update a discount."""
-    session = await get_session_by_code(db, session_code)
+    """Update a discount. Requires host token."""
+    session = await get_session_with_host_auth(db, session_code, x_host_token)
     
     # Find the discount
     result = await db.execute(
@@ -191,10 +214,11 @@ async def delete_discount(
     session_code: str,
     discount_id: str,
     background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    x_host_token: str = Header(default=None),
 ):
-    """Delete a discount."""
-    session = await get_session_by_code(db, session_code)
+    """Delete a discount. Requires host token."""
+    session = await get_session_with_host_auth(db, session_code, x_host_token)
     
     result = await db.execute(
         select(Discount).where(Discount.id == discount_id, Discount.session_id == session.id)

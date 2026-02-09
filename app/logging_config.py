@@ -3,7 +3,7 @@ import logging
 import sys
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from contextvars import ContextVar
 from typing import Optional
 
@@ -31,7 +31,7 @@ class JSONFormatter(logging.Formatter):
     
     def format(self, record: logging.LogRecord) -> str:
         log_data = {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "level": record.levelname,
             "logger": record.name,
             "message": record.getMessage(),
@@ -63,7 +63,7 @@ class TextFormatter(logging.Formatter):
         request_id = get_request_id()
         request_id_str = f"[{request_id}] " if request_id else ""
         
-        timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         base = f"{timestamp} {record.levelname:8} {request_id_str}{record.name}: {record.getMessage()}"
         
         if record.exc_info:

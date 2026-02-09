@@ -1,4 +1,5 @@
 """Database configuration and session management."""
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.pool import NullPool, AsyncAdaptedQueuePool
@@ -23,12 +24,20 @@ def create_engine():
     if is_sqlite:
         # SQLite doesn't support connection pooling the same way
         logger.info("Using SQLite database")
-        return create_async_engine(
+        eng = create_async_engine(
             settings.database_url,
             echo=settings.db_echo,
             # SQLite specific: enable foreign keys
             connect_args={"check_same_thread": False} if "aiosqlite" in settings.database_url else {},
         )
+        # Enable WAL mode and foreign keys for better concurrency
+        @event.listens_for(eng.sync_engine, "connect")
+        def _set_sqlite_pragma(dbapi_connection, connection_record):
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
+        return eng
     else:
         # PostgreSQL with connection pooling
         logger.info(
@@ -95,8 +104,9 @@ async def close_db():
 async def check_db_connection() -> bool:
     """Check if database connection is healthy."""
     try:
+        from sqlalchemy import text
         async with async_session_maker() as session:
-            await session.execute("SELECT 1")
+            await session.execute(text("SELECT 1"))
         return True
     except Exception as e:
         logger.error(f"Database health check failed: {e}")

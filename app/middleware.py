@@ -2,7 +2,7 @@
 import time
 from typing import Callable
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response, JSONResponse
@@ -33,7 +33,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
             "font-src 'self' https://fonts.gstatic.com; "
             "img-src 'self' data: blob:; "
-            "connect-src 'self'; "
+            "connect-src 'self' ws: wss:; "
             "frame-ancestors 'none';"
         )
         
@@ -114,11 +114,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self.requests_per_minute = requests_per_minute
         self.requests: dict = defaultdict(list)
         self._cleanup_interval = 60  # seconds
-        self._last_cleanup = datetime.utcnow()
+        self._last_cleanup = datetime.now(timezone.utc)
     
     def _cleanup_old_requests(self) -> None:
         """Remove expired request timestamps."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         if (now - self._last_cleanup).seconds < self._cleanup_interval:
             return
         
@@ -147,7 +147,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self._cleanup_old_requests()
         
         client_ip = self._get_client_ip(request)
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         cutoff = now - timedelta(minutes=1)
         
         # Count recent requests
