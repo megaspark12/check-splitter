@@ -11,8 +11,9 @@ import aiofiles
 from pathlib import Path
 from datetime import datetime, timezone
 from decimal import Decimal
-from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile, File, Request, WebSocket, WebSocketDisconnect
-from sqlalchemy import select
+from typing import Optional
+from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile, File, Request, WebSocket, WebSocketDisconnect, Query
+from sqlalchemy import select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -23,6 +24,7 @@ from app.services.session_service import SessionService
 from app.services.qr_service import QRService
 from app.services.calculator import BillCalculator
 from app.services.ocr_service import OCRService
+from app.services.geolocation import create_location_hash, get_geohash_neighbors
 from app.models.item import Item
 from app.models.session import Session, SessionStatus
 from app.api.dependencies import require_host_token, get_session_or_404
@@ -86,28 +88,53 @@ def get_client_network_hash(request: Request) -> str:
 @router.get("/nearby", response_model=NearbySessionsResponse)
 async def get_nearby_sessions(
     request: Request,
+    lat: Optional[float] = Query(None, ge=-90, le=90, description="GPS latitude"),
+    lng: Optional[float] = Query(None, ge=-180, le=180, description="GPS longitude"),
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Get sessions on the same network (nearby).
-    This uses the client's IP address to find sessions created from the same network.
+    Get sessions nearby.
+    
+    Matches sessions by:
+    1. Same network (IP-based) - automatic, no permission needed
+    2. Same location (GPS-based) - if lat/lng provided, requires location permission
+    
+    Both methods are combined with OR logic to maximize discovery.
     """
     network_hash = get_client_network_hash(request)
     
-    # Find active sessions on the same network with eager loading of participants
+    # Build query conditions
+    conditions = [Session.network_hash == network_hash]
+    
+    # If location provided, also match by geohash (including neighbor cells)
+    if lat is not None and lng is not None:
+        try:
+            location_hash = create_location_hash(lat, lng)
+            neighbor_hashes = get_geohash_neighbors(location_hash)
+            conditions.append(Session.location_hash.in_(neighbor_hashes))
+        except ValueError:
+            pass
+    
+    # Find active sessions matching either network OR location
     from sqlalchemy.orm import selectinload
     result = await db.execute(
         select(Session)
         .options(selectinload(Session.participants))
-        .where(Session.network_hash == network_hash)
+        .where(or_(*conditions))
         .where(Session.expires_at > datetime.now(timezone.utc))
         .where(Session.status != SessionStatus.COMPLETED)
         .order_by(Session.created_at.desc())
     )
     sessions = result.scalars().all()
     
+    # Deduplicate (a session could match both network and location)
+    seen_codes = set()
     nearby_sessions = []
     for session in sessions:
+        if session.code in seen_codes:
+            continue
+        seen_codes.add(session.code)
+        
         # Find the host
         host = next((p for p in session.participants if p.is_host), None)
         host_name = host.name if host else "Unknown"
@@ -131,13 +158,45 @@ async def create_session(
 ):
     """Create a new session and add the host as the first participant."""
     network_hash = get_client_network_hash(request)
+    
+    # Generate location hash if coordinates provided
+    location_hash = None
+    if session_data.latitude is not None and session_data.longitude is not None:
+        try:
+            location_hash = create_location_hash(session_data.latitude, session_data.longitude)
+        except ValueError:
+            pass
+    
     service = SessionService(db)
-    session, host_token = await service.create_session(session_data.host_name, network_hash=network_hash)
+    session, host_token = await service.create_session(
+        session_data.host_name, 
+        network_hash=network_hash,
+        location_hash=location_hash
+    )
     
     # Build response with host_token included (only on creation)
     response_data = SessionResponse.model_validate(session)
     response_data.host_token = host_token
     return response_data
+
+
+@router.patch("/{code}/location")
+async def update_session_location(
+    code: str,
+    request: Request,
+    session: Session = Depends(require_host_token),
+    lat: float = Query(..., ge=-90, le=90),
+    lng: float = Query(..., ge=-180, le=180),
+    db: AsyncSession = Depends(get_db)
+):
+    """Update a session's location hash. Requires host token. Called when host grants location after session creation."""
+    try:
+        location_hash = create_location_hash(lat, lng)
+        session.location_hash = location_hash
+        await db.commit()
+        return {"status": "ok", "location_hash": location_hash}
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid coordinates")
 
 
 @router.get("/{code}", response_model=SessionResponse)
@@ -302,6 +361,15 @@ async def upload_receipt(
                 db.add(item)
                 position += 1
                 total_items += 1
+        
+        # Handle edge case: no items detected
+        if total_items == 0:
+            session.status = SessionStatus.PENDING
+            await db.commit()
+            raise HTTPException(
+                status_code=422,
+                detail="No receipt items detected. Please try a clearer photo, or add items manually."
+            )
         
         session.status = SessionStatus.READY
         await db.commit()

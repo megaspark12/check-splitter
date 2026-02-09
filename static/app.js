@@ -13,6 +13,10 @@ let currentTipPercentage = 10;
 let syncInterval = null;
 let currency = { code: 'USD', symbol: '$', name: 'US Dollar' };
 
+// Geolocation state
+let userLocation = null;  // { latitude, longitude } or null if not available
+let locationPermissionStatus = 'unknown';  // 'unknown', 'granted', 'denied', 'unavailable'
+
 // WebSocket state
 let websocket = null;
 let wsReconnectAttempts = 0;
@@ -101,6 +105,79 @@ function touchLastSessionTimestamp() {
             localStorage.setItem(LAST_SESSION_KEY, JSON.stringify(last));
         }
     } catch { /* ignore */ }
+}
+
+// Geolocation Helpers
+function updateLocationDebug(msg) {
+    const el = document.getElementById('location-debug');
+    const text = document.getElementById('location-debug-text');
+    if (el && text) {
+        el.style.display = 'block';
+        text.textContent = msg;
+    }
+    console.log('📍 DEBUG:', msg);
+}
+
+function getLocation() {
+    /**
+     * Get user's location. Returns a promise with { latitude, longitude } or null.
+     * Will prompt the browser for permission if not yet granted.
+     * Works on all browsers including iOS Safari.
+     */
+    if (!navigator.geolocation) {
+        locationPermissionStatus = 'unavailable';
+        updateLocationDebug('Geolocation API not available');
+        return Promise.resolve(null);
+    }
+    
+    updateLocationDebug('Requesting location...');
+    
+    return new Promise((resolve) => {
+        navigator.geolocation.getCurrentPosition(
+            (position) => {
+                userLocation = {
+                    latitude: position.coords.latitude,
+                    longitude: position.coords.longitude
+                };
+                locationPermissionStatus = 'granted';
+                updateLocationDebug(`Got: ${userLocation.latitude.toFixed(4)}, ${userLocation.longitude.toFixed(4)} (accuracy: ${position.coords.accuracy.toFixed(0)}m)`);
+                resolve(userLocation);
+            },
+            (error) => {
+                const errorMessages = {
+                    1: 'Permission denied',
+                    2: 'Position unavailable',
+                    3: 'Timeout'
+                };
+                const msg = errorMessages[error.code] || `Unknown error ${error.code}`;
+                updateLocationDebug(`Error: ${msg} - ${error.message}`);
+                locationPermissionStatus = error.code === 1 ? 'denied' : 'unavailable';
+                userLocation = null;
+                resolve(null);
+            },
+            { enableHighAccuracy: false, timeout: 5000, maximumAge: 300000 }
+        );
+    });
+}
+
+async function updateSessionLocation() {
+    /**
+     * If we're the host and have location, update the session on the server.
+     * Called after location is obtained if a session already exists.
+     */
+    if (!isHost || !currentSession || !userLocation) return;
+    try {
+        const hostToken = getHostToken(currentSession.code);
+        if (hostToken) {
+            await apiRequest(
+                `/sessions/${currentSession.code}/location?lat=${userLocation.latitude}&lng=${userLocation.longitude}`,
+                { method: 'PATCH', headers: { 'X-Host-Token': hostToken } }
+            );
+            console.log('📍 Session location updated on server');
+        }
+    } catch (e) {
+        console.log('📍 Could not update session location:', e.message);
+    }
 }
 
 function removeSessionFromHistory(code) {
@@ -675,9 +752,21 @@ function updateStepIndicator(step) {
 // Session Management
 async function createSession(hostName) {
     try {
+        // Get location if we don't have it yet (will prompt user)
+        if (!userLocation) {
+            await getLocation();
+        }
+        
+        const body = { host_name: hostName };
+        if (userLocation) {
+            body.latitude = userLocation.latitude;
+            body.longitude = userLocation.longitude;
+        }
+        console.log('Creating session with location:', userLocation);
+        
         const session = await apiRequest('/sessions', {
             method: 'POST',
-            body: JSON.stringify({ host_name: hostName })
+            body: JSON.stringify(body)
         });
         
         currentSession = session;
@@ -760,7 +849,16 @@ async function joinSession(code, name) {
 // Nearby Sessions (like Spotify Jam)
 async function fetchNearbySessions() {
     try {
-        const response = await apiRequest('/sessions/nearby');
+        // Always include location if we have it
+        let url = '/sessions/nearby';
+        if (userLocation) {
+            url += `?lat=${userLocation.latitude}&lng=${userLocation.longitude}`;
+            updateLocationDebug(`Searching nearby with location: ${userLocation.latitude.toFixed(4)}, ${userLocation.longitude.toFixed(4)}`);
+        } else {
+            updateLocationDebug(`Searching nearby (network only, no location yet)`);
+        }
+        
+        const response = await apiRequest(url);
         const panel = document.getElementById('nearby-sessions-panel');
         const list = document.getElementById('nearby-sessions-list');
         
@@ -775,6 +873,9 @@ async function fetchNearbySessions() {
                     <span class="nearby-join-arrow">→</span>
                 </div>
             `).join('');
+            
+            // Update header based on location status
+            updateNearbyHeader();
         } else {
             panel.style.display = 'none';
         }
@@ -783,12 +884,59 @@ async function fetchNearbySessions() {
     }
 }
 
+function updateNearbyHeader() {
+    const header = document.querySelector('#nearby-sessions-panel .card-desc');
+    if (header) {
+        if (userLocation) {
+            header.textContent = 'Sessions near you - tap to join!';
+        } else if (locationPermissionStatus === 'denied') {
+            header.textContent = 'Sessions on your network - enable location for more';
+        } else {
+            header.textContent = 'Sessions on your network - tap to join!';
+        }
+    }
+}
+
+async function findNearbyWithLocation() {
+    /**
+     * Explicitly request location and then search for nearby sessions.
+     * Called when user taps "📍 Find More Nearby" button.
+     */
+    const btn = document.getElementById('find-nearby-location-btn');
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = '📍 Searching...';
+    }
+    
+    const location = await getLocation();
+    
+    if (btn) {
+        btn.disabled = false;
+        if (location) {
+            btn.textContent = '📍 Location enabled';
+            btn.classList.add('location-granted');
+        } else if (locationPermissionStatus === 'denied') {
+            btn.textContent = '📍 Location denied';
+        } else {
+            btn.textContent = '📍 Find More Nearby';
+        }
+    }
+    
+    await fetchNearbySessions();
+}
+
 function getTimeAgo(dateString) {
-    const date = new Date(dateString);
+    // Server sends UTC timestamps without Z suffix — append it so JS parses as UTC
+    let normalized = dateString;
+    if (!dateString.endsWith('Z') && !dateString.includes('+')) {
+        normalized = dateString + 'Z';
+    }
+    const date = new Date(normalized);
     const now = new Date();
     const diffMs = now - date;
     const diffMins = Math.floor(diffMs / 60000);
     
+    if (diffMins < 0) return 'just now';
     if (diffMins < 1) return 'just now';
     if (diffMins < 60) return `${diffMins}m ago`;
     const diffHours = Math.floor(diffMins / 60);
@@ -974,6 +1122,14 @@ async function uploadReceipt() {
         
         if (!response.ok) {
             const error = await response.json();
+            if (response.status === 422) {
+                // No receipt detected — let user retry or add manually
+                status.hidden = true;
+                processBtn.disabled = false;
+                processBtn.hidden = false;
+                showError(error.detail || 'No items found on receipt. Try a clearer photo or add items manually.');
+                return;
+            }
             throw new Error(error.detail || 'Upload failed');
         }
         
@@ -1884,7 +2040,13 @@ document.addEventListener('DOMContentLoaded', () => {
     // Refresh nearby sessions button
     const refreshNearbyBtn = document.getElementById('refresh-nearby-btn');
     if (refreshNearbyBtn) {
-        refreshNearbyBtn.addEventListener('click', fetchNearbySessions);
+        refreshNearbyBtn.addEventListener('click', () => fetchNearbySessions());
+    }
+    
+    // Find nearby with location button
+    const findNearbyLocationBtn = document.getElementById('find-nearby-location-btn');
+    if (findNearbyLocationBtn) {
+        findNearbyLocationBtn.addEventListener('click', findNearbyWithLocation);
     }
     
     // Quick join form (nearby sessions modal)
@@ -1914,7 +2076,14 @@ document.addEventListener('DOMContentLoaded', () => {
     // Fetch user's currency based on location
     fetchUserCurrency();
     
-    // Fetch nearby sessions on page load
+    // Get location then fetch nearby sessions
+    // On iOS Safari, geolocation can take time even after permission is granted
+    getLocation().then(() => {
+        fetchNearbySessions();
+        updateSessionLocation();
+    });
+    
+    // Also fetch immediately with whatever we have (network-only if no location yet)
     fetchNearbySessions();
     
     // --- Auto-rejoin logic ---

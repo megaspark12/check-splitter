@@ -66,6 +66,11 @@
                     </form>
                 </div>
                 
+                <!-- Location Debug (temporary) -->
+                <div id="location-debug" style="background: #1a1a2e; border: 1px solid #444; border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; font-size: 12px; color: #aaa; display: none;">
+                    📍 <span id="location-debug-text">Checking location...</span>
+                </div>
+
                 <!-- Nearby Sessions Panel -->
                 <div id="nearby-sessions-panel" class="card card-nearby" style="display: none;">
                     <div class="nearby-header">
@@ -76,6 +81,9 @@
                     <div id="nearby-sessions-list" class="nearby-list">
                         <!-- Dynamically populated -->
                     </div>
+                    <button id="find-nearby-location-btn" class="btn btn-small btn-outline location-btn">
+                        📍 Find More Nearby
+                    </button>
                 </div>
                 
                 <!-- Previous Sessions -->

@@ -9,6 +9,8 @@ from app.models.session import SessionStatus
 class SessionCreate(BaseModel):
     """Schema for creating a session."""
     host_name: str = Field(..., min_length=1, max_length=100)
+    latitude: Optional[float] = Field(None, ge=-90, le=90, description="GPS latitude for nearby discovery")
+    longitude: Optional[float] = Field(None, ge=-180, le=180, description="GPS longitude for nearby discovery")
 
 
 class AssignmentInItem(BaseModel):

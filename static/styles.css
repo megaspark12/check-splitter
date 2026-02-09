@@ -212,6 +212,34 @@ body {
     font-weight: bold;
 }
 
+/* Location button in nearby panel */
+.location-btn {
+    width: 100%;
+    margin-top: 12px;
+    font-size: 0.85rem;
+    padding: 8px 12px;
+    border: 1px dashed var(--border);
+    background: transparent;
+    color: var(--text-secondary);
+    transition: var(--transition);
+}
+
+.location-btn:hover {
+    border-color: var(--primary);
+    color: var(--primary);
+}
+
+.location-btn.location-granted {
+    border-color: var(--success);
+    color: var(--success);
+    border-style: solid;
+}
+
+.location-btn:disabled {
+    opacity: 0.7;
+    cursor: wait;
+}
+
 .modal-subtitle {
     color: var(--text-secondary);
     font-size: 0.9rem;

@@ -44,13 +44,14 @@ class SessionService:
                 return code
         raise RuntimeError("Could not generate unique session code")
     
-    async def create_session(self, host_name: str, network_hash: str = None) -> Tuple[Session, str]:
+    async def create_session(self, host_name: str, network_hash: str = None, location_hash: str = None) -> Tuple[Session, str]:
         """
         Create a new session with the host as the first participant.
         
         Args:
             host_name: Name of the session host
-            network_hash: Hash of the client's network for nearby detection
+            network_hash: Hash of the client's network for nearby detection (IP-based)
+            location_hash: Geohash of the client's location for nearby detection (GPS-based)
             
         Returns:
             Tuple of (Session object, plain-text host token)
@@ -68,6 +69,7 @@ class SessionService:
             code=code,
             status=SessionStatus.PENDING,
             network_hash=network_hash,
+            location_hash=location_hash,
             expires_at=expires_at,
             host_token_hash=Session.hash_token(host_token),
         )
