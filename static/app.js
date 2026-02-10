@@ -10,12 +10,19 @@ let currentSession = null;
 let currentParticipant = null;
 let isHost = false;
 let currentTipPercentage = 10;
+let tipMode = 'percentage'; // 'percentage' or 'amount'
+let currentTipFixedAmount = 0;
 let syncInterval = null;
 let currency = { code: 'USD', symbol: '$', name: 'US Dollar' };
 
-// Geolocation state
-let userLocation = null;  // { latitude, longitude } or null if not available
-let locationPermissionStatus = 'unknown';  // 'unknown', 'granted', 'denied', 'unavailable'
+// Geolocation state — restore from sessionStorage for instant availability on refresh
+let userLocation = (() => {
+    try {
+        const cached = sessionStorage.getItem('userLocation');
+        return cached ? JSON.parse(cached) : null;
+    } catch { return null; }
+})();
+let locationPermissionStatus = userLocation ? 'granted' : 'unknown';
 
 // WebSocket state
 let websocket = null;
@@ -108,16 +115,6 @@ function touchLastSessionTimestamp() {
 }
 
 // Geolocation Helpers
-function updateLocationDebug(msg) {
-    const el = document.getElementById('location-debug');
-    const text = document.getElementById('location-debug-text');
-    if (el && text) {
-        el.style.display = 'block';
-        text.textContent = msg;
-    }
-    console.log('📍 DEBUG:', msg);
-}
-
 function getLocation() {
     /**
      * Get user's location. Returns a promise with { latitude, longitude } or null.
@@ -126,11 +123,8 @@ function getLocation() {
      */
     if (!navigator.geolocation) {
         locationPermissionStatus = 'unavailable';
-        updateLocationDebug('Geolocation API not available');
         return Promise.resolve(null);
     }
-    
-    updateLocationDebug('Requesting location...');
     
     return new Promise((resolve) => {
         navigator.geolocation.getCurrentPosition(
@@ -140,19 +134,13 @@ function getLocation() {
                     longitude: position.coords.longitude
                 };
                 locationPermissionStatus = 'granted';
-                updateLocationDebug(`Got: ${userLocation.latitude.toFixed(4)}, ${userLocation.longitude.toFixed(4)} (accuracy: ${position.coords.accuracy.toFixed(0)}m)`);
+                try { sessionStorage.setItem('userLocation', JSON.stringify(userLocation)); } catch {}
                 resolve(userLocation);
             },
             (error) => {
-                const errorMessages = {
-                    1: 'Permission denied',
-                    2: 'Position unavailable',
-                    3: 'Timeout'
-                };
-                const msg = errorMessages[error.code] || `Unknown error ${error.code}`;
-                updateLocationDebug(`Error: ${msg} - ${error.message}`);
                 locationPermissionStatus = error.code === 1 ? 'denied' : 'unavailable';
                 userLocation = null;
+                try { sessionStorage.removeItem('userLocation'); } catch {}
                 resolve(null);
             },
             { enableHighAccuracy: false, timeout: 5000, maximumAge: 300000 }
@@ -173,10 +161,9 @@ async function updateSessionLocation() {
                 `/sessions/${currentSession.code}/location?lat=${userLocation.latitude}&lng=${userLocation.longitude}`,
                 { method: 'PATCH', headers: { 'X-Host-Token': hostToken } }
             );
-            console.log('📍 Session location updated on server');
         }
     } catch (e) {
-        console.log('📍 Could not update session location:', e.message);
+        // Location update is best-effort, don't bother the user
     }
 }
 
@@ -381,6 +368,10 @@ function showPage(pageName) {
         renderRejoinBanner();
         renderSessionHistory();
         fetchNearbySessions();
+        // Also refresh location in background and refetch
+        getLocation().then((loc) => {
+            if (loc) fetchNearbySessions();
+        });
     } else {
         startSync();
     }
@@ -440,7 +431,6 @@ function connectWebSocket() {
         websocket = new WebSocket(wsUrl);
         
         websocket.onopen = () => {
-            console.log('WebSocket connected');
             wsReconnectAttempts = 0;
             
             // Start ping interval to keep connection alive
@@ -468,7 +458,6 @@ function connectWebSocket() {
         };
         
         websocket.onclose = (event) => {
-            console.log('WebSocket closed:', event.code, event.reason);
             if (wsPingInterval) {
                 clearInterval(wsPingInterval);
                 wsPingInterval = null;
@@ -478,7 +467,6 @@ function connectWebSocket() {
             if (currentSession && wsReconnectAttempts < MAX_WS_RECONNECT_ATTEMPTS) {
                 wsReconnectAttempts++;
                 const delay = Math.min(1000 * Math.pow(2, wsReconnectAttempts), 30000);
-                console.log(`WebSocket reconnecting in ${delay}ms (attempt ${wsReconnectAttempts})`);
                 setTimeout(connectWebSocket, delay);
             }
         };
@@ -517,6 +505,9 @@ async function syncSession() {
             if (!stillInSession) {
                 // Participant was removed by host
                 stopSync();
+                clearLastSession();
+                removeSessionFromHistory(currentSession.code);
+                if (window.location.search) history.replaceState(null, '', window.location.pathname);
                 currentSession = null;
                 currentParticipant = null;
                 showToast('You have been removed from the session', 'warning', 4000);
@@ -655,9 +646,36 @@ async function fetchUserCurrency() {
         const response = await fetch(`${API_BASE}/currency?timezone=${encodeURIComponent(timezone)}`);
         if (response.ok) {
             currency = await response.json();
+            updateCurrencySymbols();
         }
     } catch (error) {
         // Use default currency
+    }
+}
+
+// Update all hardcoded currency symbols in the UI to match detected currency
+function updateCurrencySymbols() {
+    const sym = currency.symbol;
+    
+    // Tip mode toggle buttons (host + participant)
+    document.querySelectorAll('.tip-mode-btn[data-mode="amount"]').forEach(btn => {
+        btn.textContent = sym;
+    });
+    
+    // Tip amount input suffixes
+    ['tip-amount-section', 'host-tip-amount-section'].forEach(id => {
+        const section = document.getElementById(id);
+        if (section) {
+            const suffix = section.querySelector('.suffix');
+            if (suffix) suffix.textContent = sym;
+        }
+    });
+    
+    // Discount type dropdown (fixed option)
+    const discountType = document.getElementById('discount-type');
+    if (discountType) {
+        const fixedOpt = discountType.querySelector('option[value="fixed"]');
+        if (fixedOpt) fixedOpt.textContent = sym;
     }
 }
 
@@ -751,6 +769,9 @@ function updateStepIndicator(step) {
 
 // Session Management
 async function createSession(hostName) {
+    const btn = document.querySelector('#create-session-form button[type="submit"]');
+    const originalText = btn ? btn.innerHTML : '';
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="btn-icon">⏳</span> Creating…'; }
     try {
         // Get location if we don't have it yet (will prompt user)
         if (!userLocation) {
@@ -762,7 +783,6 @@ async function createSession(hostName) {
             body.latitude = userLocation.latitude;
             body.longitude = userLocation.longitude;
         }
-        console.log('Creating session with location:', userLocation);
         
         const session = await apiRequest('/sessions', {
             method: 'POST',
@@ -787,10 +807,15 @@ async function createSession(hostName) {
         
     } catch (error) {
         showError('Failed to create session: ' + error.message);
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = originalText; }
     }
 }
 
 async function joinSession(code, name) {
+    const btn = document.querySelector('#join-session-form button[type="submit"]');
+    const originalText = btn ? btn.innerHTML : '';
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="btn-icon">⏳</span> Joining…'; }
     try {
         const session = await apiRequest(`/sessions/${code}`);
         currentSession = session;
@@ -843,6 +868,8 @@ async function joinSession(code, name) {
         
     } catch (error) {
         showError('Failed to join session: ' + error.message);
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = originalText; }
     }
 }
 
@@ -853,9 +880,6 @@ async function fetchNearbySessions() {
         let url = '/sessions/nearby';
         if (userLocation) {
             url += `?lat=${userLocation.latitude}&lng=${userLocation.longitude}`;
-            updateLocationDebug(`Searching nearby with location: ${userLocation.latitude.toFixed(4)}, ${userLocation.longitude.toFixed(4)}`);
-        } else {
-            updateLocationDebug(`Searching nearby (network only, no location yet)`);
         }
         
         const response = await apiRequest(url);
@@ -863,7 +887,6 @@ async function fetchNearbySessions() {
         const list = document.getElementById('nearby-sessions-list');
         
         if (response.sessions && response.sessions.length > 0) {
-            panel.style.display = 'block';
             list.innerHTML = response.sessions.map(session => `
                 <div class="nearby-session-item" onclick="openQuickJoinModal('${session.code}', '${session.host_name}')">
                     <div class="nearby-session-info">
@@ -873,14 +896,28 @@ async function fetchNearbySessions() {
                     <span class="nearby-join-arrow">→</span>
                 </div>
             `).join('');
-            
-            // Update header based on location status
-            updateNearbyHeader();
         } else {
-            panel.style.display = 'none';
+            list.innerHTML = `
+                <div class="nearby-empty">
+                    <span class="nearby-empty-icon">📡</span>
+                    <span>No sessions found nearby</span>
+                </div>
+            `;
         }
+        
+        // Update header based on location status
+        updateNearbyHeader();
     } catch (error) {
-        document.getElementById('nearby-sessions-panel').style.display = 'none';
+        // Show panel with error state
+        const list = document.getElementById('nearby-sessions-list');
+        if (list) {
+            list.innerHTML = `
+                <div class="nearby-empty">
+                    <span class="nearby-empty-icon">⚠️</span>
+                    <span>Couldn't check for nearby sessions</span>
+                </div>
+            `;
+        }
     }
 }
 
@@ -956,13 +993,6 @@ function closeQuickJoinModal() {
     document.getElementById('quick-join-modal').classList.remove('active');
 }
 
-function quickJoinNearby(code) {
-    // Pre-fill the session code and scroll to join form
-    document.getElementById('session-code').value = code;
-    document.getElementById('join-name').focus();
-    document.getElementById('join-name').scrollIntoView({ behavior: 'smooth', block: 'center' });
-}
-
 async function loadSession(code) {
     try {
         const session = await apiRequest(`/sessions/${code}`);
@@ -1014,11 +1044,6 @@ function renderParticipantsList() {
             ${isHost && !p.is_host ? `<button class="participant-remove" onclick="event.stopPropagation(); removeParticipant('${p.id}')" title="Remove">✕</button>` : ''}
         </div>
     `).join('');
-}
-
-// Keep loadParticipants for backward compatibility but use renderParticipantsList
-async function loadParticipants() {
-    renderParticipantsList();
 }
 
 async function removeParticipant(participantId) {
@@ -1218,6 +1243,10 @@ async function toggleHostItemSelection(itemId) {
         return;
     }
     
+    // Optimistic UI: toggle visual immediately
+    const card = document.querySelector(`#items-list .item-row[data-id="${itemId}"]`);
+    if (card) card.classList.toggle('selected');
+    
     try {
         const item = currentSession.items.find(i => i.id === itemId);
         const myAssignment = item.assignments?.find(a => a.participant_id === currentParticipant.id);
@@ -1240,7 +1269,9 @@ async function toggleHostItemSelection(itemId) {
         await loadSession(currentSession.code);
         
     } catch (error) {
-        showError('Failed to update selection: ' + error.message);
+        // Revert optimistic toggle
+        if (card) card.classList.toggle('selected');
+        showToast('Failed to update selection. Try again.', 'warning');
     }
 }
 
@@ -1274,14 +1305,14 @@ function updateHostTotal() {
     }
     
     // Calculate tip on items only (consistent with server calculator)
-    const tipAmount = myItemsTotal * (currentTipPercentage / 100);
+    const tipAmount = tipMode === 'amount' ? currentTipFixedAmount : myItemsTotal * (currentTipPercentage / 100);
     const grandTotal = myItemsTotal + myTax + tipAmount;
     
     document.getElementById('host-items-total').textContent = formatCurrency(myItemsTotal);
     document.getElementById('host-tax').textContent = formatCurrency(myTax);
-    document.getElementById('host-tip-percent').textContent = currentTipPercentage;
     document.getElementById('host-tip').textContent = formatCurrency(tipAmount);
     document.getElementById('host-grand-total').textContent = formatCurrency(grandTotal);
+    updateTipLabels();
 }
 
 async function addItem() {
@@ -1422,6 +1453,21 @@ async function loadParticipantView() {
         const list = document.getElementById('participant-items-list');
         const items = session.items.filter(i => !i.is_tax && !i.is_tip_suggestion);
         
+        // Always setup participant code actions (copy, QR, share, leave)
+        setupParticipantCodeActions();
+        
+        // Show waiting state if no items yet
+        if (items.length === 0) {
+            list.innerHTML = `
+                <div class="waiting-state">
+                    <div class="waiting-icon">⏳</div>
+                    <h3>Waiting for receipt…</h3>
+                    <p>The host hasn't uploaded a receipt yet. Items will appear here automatically.</p>
+                </div>
+            `;
+            return;
+        }
+        
         list.innerHTML = items.map(item => {
             const myAssignment = item.assignments?.find(a => a.participant_id === currentParticipant.id);
             const isSelected = myAssignment && myAssignment.share_count > 0;
@@ -1464,9 +1510,6 @@ async function loadParticipantView() {
         renderParticipantDiscounts();
         
         updateYourTotal();
-
-        // Setup participant code actions if not already
-        setupParticipantCodeActions();
         
     } catch (error) {
         showError('Failed to load items: ' + error.message);
@@ -1474,6 +1517,10 @@ async function loadParticipantView() {
 }
 
 async function toggleItemSelection(itemId) {
+    // Optimistic UI: toggle visual immediately
+    const card = document.querySelector(`#participant-items-list .item-row[data-id="${itemId}"]`);
+    if (card) card.classList.toggle('selected');
+    
     try {
         const item = currentSession.items.find(i => i.id === itemId);
         const myAssignment = item.assignments?.find(a => a.participant_id === currentParticipant.id);
@@ -1496,7 +1543,9 @@ async function toggleItemSelection(itemId) {
         await loadParticipantView();
         
     } catch (error) {
-        showError('Failed to update selection: ' + error.message);
+        // Revert optimistic toggle
+        if (card) card.classList.toggle('selected');
+        showToast('Failed to update selection. Try again.', 'warning');
     }
 }
 
@@ -1598,16 +1647,30 @@ function setupParticipantCodeActions() {
     // Share link
     const shareBtn = document.getElementById('participant-share-link-btn');
     const shareModalBtn = document.getElementById('participant-share-link-modal-btn');
-    function shareSessionLink() {
+    async function shareSessionLink() {
         const url = `${window.location.origin}/?code=${currentSession.code}`;
         if (navigator.share) {
-            navigator.share({
-                title: 'Join my Check Splitter session',
-                text: `Session code: ${currentSession.code}`,
-                url
-            });
+            try {
+                await navigator.share({
+                    title: 'Join my Check Splitter session',
+                    text: `Session code: ${currentSession.code}`,
+                    url
+                });
+            } catch (e) {
+                // User cancelled share sheet — not an error
+            }
         } else {
-            navigator.clipboard.writeText(url);
+            try {
+                await navigator.clipboard.writeText(url);
+            } catch (e) {
+                // Fallback for older browsers
+                const tempInput = document.createElement('input');
+                tempInput.value = url;
+                document.body.appendChild(tempInput);
+                tempInput.select();
+                document.execCommand('copy');
+                document.body.removeChild(tempInput);
+            }
             showToast('Session link copied!', 'success');
         }
     }
@@ -1630,6 +1693,8 @@ function setupParticipantCodeActions() {
                 async () => {
                     try {
                         stopSync();
+                        clearLastSession();
+                        if (window.location.search) history.replaceState(null, '', window.location.pathname);
                         currentSession = null;
                         currentParticipant = null;
                         isHost = false;
@@ -1649,60 +1714,110 @@ function setupParticipantCodeActions() {
 
 // Tip Selection
 function setupTipHandlers() {
-    // Participant tip buttons
-    const participantTipBtns = document.querySelectorAll('#participant-page .tip-btn');
+    // --- Tip mode toggle (% vs $) for participant ---
+    document.querySelectorAll('#participant-page .tip-mode-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const mode = btn.dataset.mode;
+            if (mode === tipMode) return;
+            tipMode = mode;
+            document.querySelectorAll('#participant-page .tip-mode-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            document.getElementById('tip-percent-section').style.display = mode === 'percentage' ? '' : 'none';
+            document.getElementById('tip-amount-section').style.display = mode === 'amount' ? '' : 'none';
+            // Re-send with remembered value for the new mode
+            sendTipUpdate();
+        });
+    });
+
+    // --- Tip mode toggle for host ---
+    document.querySelectorAll('#session-page .tip-mode-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const mode = btn.dataset.mode;
+            if (mode === tipMode) return;
+            tipMode = mode;
+            document.querySelectorAll('#session-page .tip-mode-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            document.getElementById('host-tip-percent-section').style.display = mode === 'percentage' ? '' : 'none';
+            document.getElementById('host-tip-amount-section').style.display = mode === 'amount' ? '' : 'none';
+            sendTipUpdate();
+        });
+    });
+
+    // Participant tip % buttons
+    const participantTipBtns = document.querySelectorAll('#participant-page .tip-percent-btn');
     const customInput = document.getElementById('custom-tip-value');
     
     participantTipBtns.forEach(btn => {
         btn.addEventListener('click', async () => {
             participantTipBtns.forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
-            
-            const tip = parseInt(btn.dataset.tip);
-            currentTipPercentage = tip;
-            customInput.value = '';
-            
-            await updateTip(tip);
+            currentTipPercentage = parseInt(btn.dataset.tip);
+            if (customInput) customInput.value = '';
+            await sendTipUpdate();
         });
     });
     
-    customInput.addEventListener('input', async () => {
-        const tip = parseInt(customInput.value) || 0;
-        currentTipPercentage = tip;
-        
-        participantTipBtns.forEach(b => b.classList.remove('active'));
-        
-        await updateTip(tip);
-    });
+    if (customInput) {
+        customInput.addEventListener('input', async () => {
+            currentTipPercentage = parseInt(customInput.value) || 0;
+            participantTipBtns.forEach(b => b.classList.remove('active'));
+            await sendTipUpdate();
+        });
+    }
+
+    // Participant tip $ input
+    const tipAmountInput = document.getElementById('tip-amount-value');
+    if (tipAmountInput) {
+        tipAmountInput.addEventListener('input', async () => {
+            currentTipFixedAmount = parseFloat(tipAmountInput.value) || 0;
+            await sendTipUpdate();
+        });
+    }
     
-    // Host tip buttons
-    const hostTipBtns = document.querySelectorAll('.host-tip-btn');
-    
+    // Host tip % buttons
+    const hostTipBtns = document.querySelectorAll('.host-tip-percent-btn');
     hostTipBtns.forEach(btn => {
         btn.addEventListener('click', async () => {
             hostTipBtns.forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
-            
-            const tip = parseInt(btn.dataset.tip);
-            currentTipPercentage = tip;
-            
-            await updateTip(tip);
+            currentTipPercentage = parseInt(btn.dataset.tip);
+            await sendTipUpdate();
         });
     });
+
+    // Host tip $ input
+    const hostTipAmountInput = document.getElementById('host-tip-amount-value');
+    if (hostTipAmountInput) {
+        hostTipAmountInput.addEventListener('input', async () => {
+            currentTipFixedAmount = parseFloat(hostTipAmountInput.value) || 0;
+            await sendTipUpdate();
+        });
+    }
 }
 
-async function updateTip(percentage) {
-    // Update participant page display if it exists
-    const tipDisplay = document.getElementById('tip-percent-display');
-    if (tipDisplay) {
-        tipDisplay.textContent = percentage;
+function updateTipLabels() {
+    // Participant tip label
+    const tipLabel = document.getElementById('tip-label-display');
+    if (tipLabel) {
+        if (tipMode === 'amount') {
+            tipLabel.textContent = 'Tip (fixed)';
+        } else {
+            tipLabel.textContent = `Tip (${currentTipPercentage}%)`;
+        }
     }
-    
-    // Update host page display
-    const hostTipDisplay = document.getElementById('host-tip-percent');
-    if (hostTipDisplay) {
-        hostTipDisplay.textContent = percentage;
+    // Host tip label
+    const hostTipLabel = document.getElementById('host-tip-label-display');
+    if (hostTipLabel) {
+        if (tipMode === 'amount') {
+            hostTipLabel.textContent = 'Tip (fixed)';
+        } else {
+            hostTipLabel.textContent = `Tip (${currentTipPercentage}%)`;
+        }
     }
+}
+
+async function sendTipUpdate() {
+    updateTipLabels();
     
     if (!currentParticipant) {
         updateYourTotal();
@@ -1710,13 +1825,23 @@ async function updateTip(percentage) {
         return;
     }
     
+    const body = tipMode === 'amount'
+        ? { tip_amount: currentTipFixedAmount }
+        : { tip_percentage: currentTipPercentage };
+    
     try {
         await apiRequest(`/sessions/${currentSession.code}/participants/${currentParticipant.id}`, {
             method: 'PUT',
-            body: JSON.stringify({ tip_percentage: percentage })
+            body: JSON.stringify(body)
         });
         
-        currentParticipant.tip_percentage = percentage;
+        if (tipMode === 'amount') {
+            currentParticipant.tip_amount = currentTipFixedAmount;
+            currentParticipant.tip_percentage = null;
+        } else {
+            currentParticipant.tip_percentage = currentTipPercentage;
+            currentParticipant.tip_amount = null;
+        }
         updateYourTotal();
         updateHostTotal();
         
@@ -1744,8 +1869,8 @@ async function updateYourTotalFromServer() {
             document.getElementById('your-items-total').textContent = formatCurrency(mySummary.items_subtotal);
             document.getElementById('your-tax').textContent = formatCurrency(mySummary.tax_share);
             document.getElementById('your-tip').textContent = formatCurrency(mySummary.tip_amount);
-            document.getElementById('tip-percent-display').textContent = currentTipPercentage;
             document.getElementById('your-grand-total').textContent = formatCurrency(mySummary.total);
+            updateTipLabels();
             
             // Show discount row if there's a discount
             const discountRow = document.getElementById('your-discount-row');
@@ -1794,16 +1919,15 @@ function updateYourTotalLocal() {
     }
     
     // Calculate tip based on YOUR items only
-    const tipPercentage = currentTipPercentage;
-    const tip = itemsTotal * (tipPercentage / 100);
+    const tip = tipMode === 'amount' ? currentTipFixedAmount : itemsTotal * (currentTipPercentage / 100);
     
     const grandTotal = itemsTotal + tax + tip;
     
     document.getElementById('your-items-total').textContent = formatCurrency(itemsTotal);
     document.getElementById('your-tax').textContent = formatCurrency(tax);
     document.getElementById('your-tip').textContent = formatCurrency(tip);
-    document.getElementById('tip-percent-display').textContent = tipPercentage;
     document.getElementById('your-grand-total').textContent = formatCurrency(grandTotal);
+    updateTipLabels();
     
     // Hide discount row for local calculation
     const discountRow = document.getElementById('your-discount-row');
@@ -1860,11 +1984,6 @@ function renderDiscountsList() {
             </div>
         `;
     }).join('');
-}
-
-// Keep loadDiscounts for backward compatibility
-async function loadDiscounts() {
-    renderDiscountsList();
 }
 
 async function addDiscount() {
@@ -2037,10 +2156,16 @@ document.addEventListener('DOMContentLoaded', () => {
     // Refresh button (participant)
     document.getElementById('refresh-btn').addEventListener('click', loadParticipantView);
     
-    // Refresh nearby sessions button
+    // Refresh nearby sessions button (hard refresh — re-request location)
     const refreshNearbyBtn = document.getElementById('refresh-nearby-btn');
     if (refreshNearbyBtn) {
-        refreshNearbyBtn.addEventListener('click', () => fetchNearbySessions());
+        refreshNearbyBtn.addEventListener('click', async () => {
+            const icon = refreshNearbyBtn.querySelector('.refresh-icon');
+            if (icon) icon.classList.add('spinning');
+            await getLocation();
+            await fetchNearbySessions();
+            if (icon) icon.classList.remove('spinning');
+        });
     }
     
     // Find nearby with location button

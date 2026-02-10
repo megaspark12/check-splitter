@@ -24,4 +24,3 @@ aiofiles>=23.2.0  # Async file operations
 
 # Production
 gunicorn>=21.0.0  # Production WSGI server
-psutil>=5.9.0  # System metrics

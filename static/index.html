@@ -66,20 +66,18 @@
                     </form>
                 </div>
                 
-                <!-- Location Debug (temporary) -->
-                <div id="location-debug" style="background: #1a1a2e; border: 1px solid #444; border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; font-size: 12px; color: #aaa; display: none;">
-                    📍 <span id="location-debug-text">Checking location...</span>
-                </div>
-
                 <!-- Nearby Sessions Panel -->
-                <div id="nearby-sessions-panel" class="card card-nearby" style="display: none;">
+                <div id="nearby-sessions-panel" class="card card-nearby">
                     <div class="nearby-header">
                         <h2>📡 Nearby Sessions</h2>
-                        <button id="refresh-nearby-btn" class="btn btn-small btn-ghost">🔄</button>
+                        <button id="refresh-nearby-btn" class="btn btn-small btn-ghost" title="Refresh"><span class="refresh-icon">🔄</span></button>
                     </div>
-                    <p class="card-desc">Sessions on your network - tap to join!</p>
+                    <p class="card-desc">Looking for sessions nearby...</p>
                     <div id="nearby-sessions-list" class="nearby-list">
-                        <!-- Dynamically populated -->
+                        <div class="nearby-empty">
+                            <span class="nearby-empty-icon">📡</span>
+                            <span>No sessions found nearby</span>
+                        </div>
                     </div>
                     <button id="find-nearby-location-btn" class="btn btn-small btn-outline location-btn">
                         📍 Find More Nearby
@@ -227,13 +225,28 @@
                 <!-- Host Tip Selection -->
                 <div class="tip-section-host">
                     <h4>💵 Add Your Tip</h4>
-                    <div class="tip-selector host-tip-selector">
-                        <button class="tip-btn host-tip-btn" data-tip="0">No Tip</button>
-                        <button class="tip-btn host-tip-btn active" data-tip="10">10%</button>
-                        <button class="tip-btn host-tip-btn" data-tip="15">15%</button>
-                        <button class="tip-btn host-tip-btn" data-tip="18">18%</button>
-                        <button class="tip-btn host-tip-btn" data-tip="20">20%</button>
-                        <button class="tip-btn host-tip-btn" data-tip="25">25%</button>
+                    <div class="tip-mode-toggle">
+                        <button class="tip-mode-btn active" data-mode="percentage">%</button>
+                        <button class="tip-mode-btn" data-mode="amount">$</button>
+                    </div>
+                    <div id="host-tip-percent-section">
+                        <div class="tip-selector host-tip-selector">
+                            <button class="tip-btn host-tip-percent-btn" data-tip="0">No Tip</button>
+                            <button class="tip-btn host-tip-percent-btn active" data-tip="10">10%</button>
+                            <button class="tip-btn host-tip-percent-btn" data-tip="15">15%</button>
+                            <button class="tip-btn host-tip-percent-btn" data-tip="18">18%</button>
+                            <button class="tip-btn host-tip-percent-btn" data-tip="20">20%</button>
+                            <button class="tip-btn host-tip-percent-btn" data-tip="25">25%</button>
+                        </div>
+                    </div>
+                    <div id="host-tip-amount-section" style="display: none;">
+                        <div class="custom-tip">
+                            <label>Enter tip amount:</label>
+                            <div class="input-with-suffix">
+                                <span class="suffix">$</span>
+                                <input type="number" id="host-tip-amount-value" placeholder="0.00" min="0" step="0.01">
+                            </div>
+                        </div>
                     </div>
                 </div>
                 
@@ -247,7 +260,7 @@
                         <span id="host-tax">$0.00</span>
                     </div>
                     <div class="total-row">
-                        <span>Your Tip (<span id="host-tip-percent">10</span>%)</span>
+                        <span id="host-tip-label-display">Tip (10%)</span>
                         <span id="host-tip">$0.00</span>
                     </div>
                     <div class="total-grand">
@@ -372,19 +385,34 @@
                 <div class="card-header">
                     <h2>💵 Add Tip</h2>
                 </div>
-                <div class="tip-selector">
-                    <button class="tip-btn" data-tip="0">No Tip</button>
-                    <button class="tip-btn active" data-tip="10">10%</button>
-                    <button class="tip-btn" data-tip="15">15%</button>
-                    <button class="tip-btn" data-tip="18">18%</button>
-                    <button class="tip-btn" data-tip="20">20%</button>
-                    <button class="tip-btn" data-tip="25">25%</button>
+                <div class="tip-mode-toggle">
+                    <button class="tip-mode-btn active" data-mode="percentage">%</button>
+                    <button class="tip-mode-btn" data-mode="amount">$</button>
                 </div>
-                <div id="custom-tip-section" class="custom-tip">
-                    <label>Or enter custom amount:</label>
-                    <div class="input-with-suffix">
-                        <input type="number" id="custom-tip-value" placeholder="0" min="0" max="100">
-                        <span class="suffix">%</span>
+                <div id="tip-percent-section">
+                    <div class="tip-selector">
+                        <button class="tip-btn tip-percent-btn" data-tip="0">No Tip</button>
+                        <button class="tip-btn tip-percent-btn active" data-tip="10">10%</button>
+                        <button class="tip-btn tip-percent-btn" data-tip="15">15%</button>
+                        <button class="tip-btn tip-percent-btn" data-tip="18">18%</button>
+                        <button class="tip-btn tip-percent-btn" data-tip="20">20%</button>
+                        <button class="tip-btn tip-percent-btn" data-tip="25">25%</button>
+                    </div>
+                    <div id="custom-tip-section" class="custom-tip">
+                        <label>Or enter custom amount:</label>
+                        <div class="input-with-suffix">
+                            <input type="number" id="custom-tip-value" placeholder="0" min="0" max="100">
+                            <span class="suffix">%</span>
+                        </div>
+                    </div>
+                </div>
+                <div id="tip-amount-section" style="display: none;">
+                    <div class="custom-tip" style="border-top: none; margin-top: 8px; padding-top: 0;">
+                        <label>Enter tip amount:</label>
+                        <div class="input-with-suffix">
+                            <span class="suffix">$</span>
+                            <input type="number" id="tip-amount-value" placeholder="0.00" min="0" step="0.01">
+                        </div>
                     </div>
                 </div>
             </div>
@@ -419,7 +447,7 @@
                         <span id="your-tax">$0.00</span>
                     </div>
                     <div class="total-row">
-                        <span>Tip (<span id="tip-percent-display">10</span>%)</span>
+                        <span id="tip-label-display">Tip (10%)</span>
                         <span id="your-tip">$0.00</span>
                     </div>
                 </div>

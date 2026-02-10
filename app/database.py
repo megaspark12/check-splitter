@@ -2,7 +2,7 @@
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
-from sqlalchemy.pool import NullPool, AsyncAdaptedQueuePool
+from sqlalchemy.pool import AsyncAdaptedQueuePool
 from app.config import get_settings
 from app.logging_config import get_logger
 
@@ -100,14 +100,3 @@ async def close_db():
     logger.info("Closing database connections")
     await engine.dispose()
 
-
-async def check_db_connection() -> bool:
-    """Check if database connection is healthy."""
-    try:
-        from sqlalchemy import text
-        async with async_session_maker() as session:
-            await session.execute(text("SELECT 1"))
-        return True
-    except Exception as e:
-        logger.error(f"Database health check failed: {e}")
-        return False

@@ -1,12 +1,10 @@
 """FastAPI application entry point."""
-import sys
 import traceback
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -187,36 +185,3 @@ async def health_check():
         "environment": settings.environment,
     }
 
-
-# ====== Internal Metrics Server (separate port) ======
-
-metrics_app = FastAPI(
-    title=f"{settings.app_name} Metrics",
-    description="Internal metrics endpoint",
-    docs_url=None,
-    redoc_url=None,
-    openapi_url=None,
-)
-
-
-@metrics_app.get("/metrics")
-async def get_metrics():
-    """Basic metrics endpoint for monitoring (internal port only)."""
-    import psutil
-    import os
-    
-    process = psutil.Process(os.getpid())
-    
-    return {
-        "status": "ok",
-        "uptime_seconds": process.create_time(),
-        "memory_mb": round(process.memory_info().rss / 1024 / 1024, 2),
-        "cpu_percent": process.cpu_percent(),
-        "threads": process.num_threads(),
-    }
-
-
-@metrics_app.get("/health")
-async def metrics_health():
-    """Health check for metrics server."""
-    return {"status": "ok"}

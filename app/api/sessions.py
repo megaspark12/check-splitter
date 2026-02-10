@@ -4,7 +4,6 @@ Sessions API routes.
 Handles session creation, retrieval, QR codes, summaries, and WebSocket connections.
 """
 import os
-import re
 import uuid
 import hashlib
 import aiofiles
