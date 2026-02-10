@@ -61,3 +61,6 @@ logs/
 Thumbs.db
 
 CHAT_CONTEXT.md
+terraform/plan.out
+terraform/plan2.out
+terraform/*.tfstate*

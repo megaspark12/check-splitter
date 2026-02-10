@@ -87,7 +87,10 @@ resource "google_artifact_registry_repository" "app" {
 # ====== Cloud SQL (PostgreSQL) ======
 
 resource "google_sql_database_instance" "main" {
-  depends_on = [google_project_service.apis]
+  depends_on = [
+    google_project_service.apis,
+    google_service_networking_connection.private_vpc,
+  ]
 
   name             = "check-splitter-${random_id.suffix.hex}"
   database_version = "POSTGRES_15"
@@ -349,10 +352,6 @@ resource "google_cloud_run_v2_service" "app" {
       env {
         name  = "ENVIRONMENT"
         value = "production"
-      }
-      env {
-        name  = "PORT"
-        value = "8000"
       }
       env {
         name  = "WORKERS"

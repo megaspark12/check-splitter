@@ -33,8 +33,8 @@ class Session(Base):
     )
     network_hash = Column(String(64), nullable=True, index=True)  # For nearby session detection (IP-based)
     location_hash = Column(String(12), nullable=True, index=True)  # For nearby session detection (geolocation-based)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
-    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
     host_token_hash = Column(String(64), nullable=True)  # SHA-256 hash of host token
     
     # Relationships
