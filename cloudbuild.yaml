@@ -1,0 +1,59 @@
+# ============================================
+# Cloud Build CI/CD Pipeline
+# ============================================
+# Triggered on push to main branch (or manually)
+#
+# Steps:
+#   1. Build Docker image
+#   2. Push to Artifact Registry
+#   3. Deploy to Cloud Run
+#
+# Required substitution variables (set in Cloud Build trigger):
+#   _REGION        - GCP region (e.g., us-central1)
+#   _SERVICE_NAME  - Cloud Run service name (e.g., check-splitter)
+#   _AR_REPO       - Artifact Registry repo (e.g., check-splitter)
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+substitutions:
+  _REGION: us-central1
+  _SERVICE_NAME: check-splitter
+  _AR_REPO: check-splitter
+
+steps:
+  # Step 1: Build Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/app:$SHORT_SHA'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/app:latest'
+      - '--cache-from'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/app:latest'
+      - '.'
+
+  # Step 2: Push to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - '--all-tags'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/app'
+
+  # Step 3: Deploy to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'services'
+      - 'update'
+      - '${_SERVICE_NAME}'
+      - '--region=${_REGION}'
+      - '--image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/app:$SHORT_SHA'
+
+images:
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/app:$SHORT_SHA'
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/app:latest'
+
+timeout: '1200s'  # 20 minutes max

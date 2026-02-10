@@ -2,15 +2,21 @@
 AI-powered Receipt Recognition Service using Google Gemini.
 
 Uses Gemini's vision capabilities to extract structured data from receipt images.
+Includes retry logic with exponential backoff for API resilience.
 """
 import io
 import json
 import base64
+import asyncio
 from typing import List, Dict, Any, Optional
 from decimal import Decimal
 from PIL import Image
+import tenacity
 
 from app.config import get_settings
+from app.logging_config import get_logger
+
+logger = get_logger("ocr_service")
 
 
 class ReceiptItem:
@@ -86,6 +92,15 @@ Return ONLY valid JSON, no other text."""
             self._client = genai.GenerativeModel(self.model_name)
         return self._client
     
+    @tenacity.retry(
+        stop=tenacity.stop_after_attempt(3),
+        wait=tenacity.wait_exponential(multiplier=1, min=1, max=10),
+        retry=tenacity.retry_if_exception_type((ConnectionError, TimeoutError, OSError)),
+        before_sleep=lambda retry_state: logger.warning(
+            f"Gemini API call failed (attempt {retry_state.attempt_number}), retrying..."
+        ),
+        reraise=True,
+    )
     async def parse_receipt(self, image_bytes: bytes) -> Dict[str, Any]:
         """
         Parse a receipt image and extract structured data.
@@ -95,6 +110,8 @@ Return ONLY valid JSON, no other text."""
             
         Returns:
             Dict with items, currency, subtotal, tax, total
+            
+        Retries up to 3 times with exponential backoff on transient errors.
         """
         if not self.api_key:
             raise ValueError(
@@ -114,10 +131,17 @@ Return ONLY valid JSON, no other text."""
         
         # Call Gemini with the image (run in thread to avoid blocking event loop)
         import asyncio
-        response = await asyncio.to_thread(
-            model.generate_content,
-            [self.RECEIPT_PROMPT, image]
-        )
+        try:
+            response = await asyncio.wait_for(
+                asyncio.to_thread(
+                    model.generate_content,
+                    [self.RECEIPT_PROMPT, image]
+                ),
+                timeout=60,  # 60s timeout for Gemini API call
+            )
+        except asyncio.TimeoutError:
+            logger.error("Gemini API call timed out after 60s")
+            raise TimeoutError("Receipt processing timed out. Please try again.")
         
         # Parse the JSON response
         try:

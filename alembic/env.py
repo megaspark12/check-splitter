@@ -25,8 +25,8 @@ config = context.config
 # Get application settings
 settings = get_settings()
 
-# Override sqlalchemy.url with our settings
-config.set_main_option("sqlalchemy.url", settings.database_url)
+# Override sqlalchemy.url with our settings (supports Cloud SQL auto-construction)
+config.set_main_option("sqlalchemy.url", settings.effective_database_url)
 
 # Interpret the config file for Python logging.
 if config.config_file_name is not None:

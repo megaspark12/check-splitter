@@ -1,6 +1,6 @@
 """Application configuration."""
 import sys
-from typing import List
+from typing import List, Optional
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 
@@ -17,13 +17,17 @@ class Settings(BaseSettings):
     # Server
     host: str = "0.0.0.0"
     port: int = 8000
-    workers: int = 1
+    workers: int = 2
     
     # CORS - comma-separated list of allowed origins
     cors_origins: str = "*"
     
     # Database
     database_url: str = "sqlite+aiosqlite:///./check_splitter.db"
+    db_user: str = ""
+    db_pass: str = ""
+    db_name: str = "check_splitter"
+    instance_connection_name: str = ""  # Cloud SQL: project:region:instance
     db_pool_size: int = 5
     db_max_overflow: int = 10
     db_pool_timeout: int = 30
@@ -37,9 +41,11 @@ class Settings(BaseSettings):
     session_expiry_minutes: int = 15
     session_code_length: int = 6
     
-    # File uploads
+    # File uploads / Storage
     max_upload_size_mb: int = 10
     uploads_dir: str = "uploads"
+    storage_backend: str = "local"  # "local" or "gcs"
+    gcs_bucket_name: str = ""  # GCS bucket for receipt images
     
     # Rate limiting
     rate_limit_per_minute: int = 180
@@ -47,6 +53,9 @@ class Settings(BaseSettings):
     # Logging
     log_level: str = "INFO"
     log_format: str = "json"  # json or text
+    
+    # Migrations
+    run_migrations: bool = False  # Run alembic upgrade head on startup
     
     class Config:
         env_file = ".env"
@@ -74,6 +83,24 @@ class Settings(BaseSettings):
         """Get max upload size in bytes."""
         return self.max_upload_size_mb * 1024 * 1024
     
+    @property
+    def effective_database_url(self) -> str:
+        """Build the database URL, supporting Cloud SQL Unix sockets."""
+        # If a full DATABASE_URL is provided, use it directly
+        if self.database_url != "sqlite+aiosqlite:///./check_splitter.db":
+            return self.database_url
+        
+        # Auto-construct from Cloud SQL components if available
+        if self.instance_connection_name and self.db_user and self.db_pass:
+            socket_path = f"/cloudsql/{self.instance_connection_name}"
+            return (
+                f"postgresql+asyncpg://{self.db_user}:{self.db_pass}"
+                f"@/{self.db_name}?host={socket_path}"
+            )
+        
+        # Fall back to default
+        return self.database_url
+    
     def validate_production_config(self) -> None:
         """Validate that production-required settings are configured."""
         if self.is_production:
@@ -88,7 +115,7 @@ class Settings(BaseSettings):
             if self.cors_origins == "*":
                 errors.append("CORS_ORIGINS should not be '*' in production")
             
-            if "sqlite" in self.database_url.lower():
+            if "sqlite" in self.effective_database_url.lower():
                 # Warning only, not an error
                 print("WARNING: Using SQLite in production is not recommended", file=sys.stderr)
             

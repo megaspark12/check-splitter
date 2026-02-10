@@ -23,6 +23,7 @@ from app.services.session_service import SessionService
 from app.services.qr_service import QRService
 from app.services.calculator import BillCalculator
 from app.services.ocr_service import OCRService
+from app.services.storage_service import get_storage_backend
 from app.services.geolocation import create_location_hash, get_geohash_neighbors
 from app.models.item import Item
 from app.models.session import Session, SessionStatus
@@ -279,10 +280,6 @@ async def upload_receipt(
     image_bytes = b"".join(chunks)
     logger.info(f"Processing receipt upload for session {code}", extra={"file_size": total_size})
     
-    # Prepare uploads directory using config
-    uploads_dir = Path(settings.uploads_dir)
-    uploads_dir.mkdir(parents=True, exist_ok=True)
-    
     # Sanitize file extension (prevent path traversal)
     if file.filename:
         # Extract only the extension, sanitize it
@@ -295,14 +292,13 @@ async def upload_receipt(
     
     # Generate safe filename (no user input in path)
     filename = f"{session.id}_{uuid.uuid4().hex[:8]}{file_ext}"
-    filepath = uploads_dir / filename
     
-    # Write file asynchronously
-    async with aiofiles.open(filepath, "wb") as f:
-        await f.write(image_bytes)
+    # Save via storage backend (local or GCS)
+    storage = get_storage_backend()
+    filepath = await storage.save(image_bytes, filename)
     
     # Update session with image path
-    session.receipt_image_path = str(filepath)
+    session.receipt_image_path = filepath
     session.status = SessionStatus.PROCESSING
     await db.commit()
     

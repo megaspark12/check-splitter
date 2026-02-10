@@ -17,18 +17,19 @@ class Base(DeclarativeBase):
 def create_engine():
     """Create database engine with appropriate settings."""
     settings = get_settings()
+    db_url = settings.effective_database_url
     
     # Determine if using SQLite or PostgreSQL
-    is_sqlite = "sqlite" in settings.database_url.lower()
+    is_sqlite = "sqlite" in db_url.lower()
     
     if is_sqlite:
         # SQLite doesn't support connection pooling the same way
         logger.info("Using SQLite database")
         eng = create_async_engine(
-            settings.database_url,
+            db_url,
             echo=settings.db_echo,
             # SQLite specific: enable foreign keys
-            connect_args={"check_same_thread": False} if "aiosqlite" in settings.database_url else {},
+            connect_args={"check_same_thread": False} if "aiosqlite" in db_url else {},
         )
         # Enable WAL mode and foreign keys for better concurrency
         @event.listens_for(eng.sync_engine, "connect")
@@ -40,12 +41,20 @@ def create_engine():
         return eng
     else:
         # PostgreSQL with connection pooling
+        # Mask password for logging
+        safe_url = db_url.split("@")[-1] if "@" in db_url else "configured"
         logger.info(
-            f"Using PostgreSQL with pool_size={settings.db_pool_size}, "
+            f"Using PostgreSQL ({safe_url}) with pool_size={settings.db_pool_size}, "
             f"max_overflow={settings.db_max_overflow}"
         )
+        
+        connect_args = {}
+        # Cloud SQL Unix socket support
+        if "/cloudsql/" in db_url:
+            logger.info("Cloud SQL Unix socket connection detected")
+        
         return create_async_engine(
-            settings.database_url,
+            db_url,
             echo=settings.db_echo,
             poolclass=AsyncAdaptedQueuePool,
             pool_size=settings.db_pool_size,
@@ -53,6 +62,7 @@ def create_engine():
             pool_timeout=settings.db_pool_timeout,
             pool_pre_ping=True,  # Verify connections before using
             pool_recycle=1800,  # Recycle connections after 30 minutes
+            connect_args=connect_args,
         )
 
 

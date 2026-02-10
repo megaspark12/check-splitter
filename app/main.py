@@ -178,10 +178,29 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint for load balancers and monitoring."""
-    return {
+    """Health check endpoint for Cloud Run and load balancers.
+    
+    Verifies database connectivity for readiness probes.
+    """
+    from app.database import async_session_maker
+    
+    health = {
         "status": "healthy",
         "version": settings.version,
         "environment": settings.environment,
     }
+    
+    # Check database connectivity
+    try:
+        async with async_session_maker() as session:
+            from sqlalchemy import text
+            await session.execute(text("SELECT 1"))
+        health["database"] = "connected"
+    except Exception as e:
+        logger.error(f"Health check DB failure: {e}")
+        health["status"] = "degraded"
+        health["database"] = "disconnected"
+        return JSONResponse(status_code=503, content=health)
+    
+    return health
 

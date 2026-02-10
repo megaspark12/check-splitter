@@ -21,6 +21,10 @@ qrcode[pil]>=7.4.2
 # Utilities
 python-dotenv>=1.0.0
 aiofiles>=23.2.0  # Async file operations
+tenacity>=8.2.0  # Retry logic for external APIs
+
+# Cloud Storage
+google-cloud-storage>=2.14.0  # GCS for receipt image uploads
 
 # Production
 gunicorn>=21.0.0  # Production WSGI server

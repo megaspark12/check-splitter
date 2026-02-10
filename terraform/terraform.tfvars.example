@@ -1,0 +1,37 @@
+# ============================================
+# Example Terraform Variables
+# ============================================
+# Copy this file to terraform.tfvars and fill in your values:
+#   cp terraform.tfvars.example terraform.tfvars
+
+# REQUIRED
+project_id     = "your-gcp-project-id"
+gemini_api_key = "your-gemini-api-key"
+
+# Region (default: us-central1)
+# region = "us-central1"
+
+# Cloud Run scaling
+# min_instances = 0    # Set to 1+ to avoid cold starts
+# max_instances = 5
+# cpu           = "1"
+# memory        = "512Mi"
+# workers       = 2
+
+# Cloud SQL
+# db_tier         = "db-f1-micro"   # Use db-g1-small or higher for production traffic
+# db_disk_size_gb = 10
+# db_ha           = false           # Set to true for production
+
+# Custom domain (optional)
+# domain = "checksplitter.yourdomain.com"
+
+# CORS (restrict to your domain in production)
+# cors_origins = ["https://checksplitter.yourdomain.com"]
+
+# Logging
+# log_level = "INFO"
+
+# Safety flags
+# deletion_protection   = true
+# create_tfstate_bucket = false   # Set true on first apply for remote state

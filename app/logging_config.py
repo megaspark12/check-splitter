@@ -27,12 +27,15 @@ def generate_request_id() -> str:
 
 
 class JSONFormatter(logging.Formatter):
-    """JSON log formatter for structured logging."""
+    """JSON log formatter for structured logging.
+    
+    Uses 'severity' instead of 'level' for Google Cloud Logging compatibility.
+    """
     
     def format(self, record: logging.LogRecord) -> str:
         log_data = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "level": record.levelname,
+            "severity": record.levelname,  # Cloud Logging expects 'severity'
             "logger": record.name,
             "message": record.getMessage(),
             "module": record.module,

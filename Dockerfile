@@ -49,9 +49,11 @@ COPY --chown=appuser:appuser static/ ./static/
 COPY --chown=appuser:appuser alembic/ ./alembic/
 COPY --chown=appuser:appuser alembic.ini ./
 COPY --chown=appuser:appuser run.py ./
+COPY --chown=appuser:appuser entrypoint.sh ./
 
 # Create directories for uploads and data
 RUN mkdir -p /app/uploads /app/data && \
+    chmod +x /app/entrypoint.sh && \
     chown -R appuser:appuser /app
 
 # Switch to non-root user
@@ -62,15 +64,14 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app \
     PORT=8000 \
-    METRICS_PORT=9090
+    WORKERS=2
 
-# Expose ports (main app and internal metrics)
+# Expose application port
 EXPOSE 8000
-EXPOSE 9090
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:${PORT}/health || exit 1
 
-# Run with the dual-server script
-CMD ["python", "run.py"]
+# Run via entrypoint (migrations + gunicorn)
+CMD ["./entrypoint.sh"]
