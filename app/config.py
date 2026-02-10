@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     # AI Vision (Gemini)
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash-preview-05-20"  # Latest vision model
+    gemini_daily_limit: int = 100  # Max Gemini API calls per day (0 = unlimited)
     
     # Session
     session_expiry_minutes: int = 15

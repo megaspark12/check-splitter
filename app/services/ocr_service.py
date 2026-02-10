@@ -8,6 +8,8 @@ import io
 import json
 import base64
 import asyncio
+import threading
+from datetime import date
 from typing import List, Dict, Any, Optional
 from decimal import Decimal
 from PIL import Image
@@ -17,6 +19,60 @@ from app.config import get_settings
 from app.logging_config import get_logger
 
 logger = get_logger("ocr_service")
+
+
+class DailyCallLimiter:
+    """Thread-safe daily API call counter.
+    
+    Tracks the number of calls made today and rejects once the limit is hit.
+    Resets automatically at midnight (server time).
+    """
+
+    def __init__(self, daily_limit: int):
+        self._limit = daily_limit
+        self._count = 0
+        self._date = date.today()
+        self._lock = threading.Lock()
+
+    def _maybe_reset(self) -> None:
+        """Reset counter if the date has rolled over."""
+        today = date.today()
+        if today != self._date:
+            self._count = 0
+            self._date = today
+
+    def acquire(self) -> bool:
+        """Try to acquire a call slot. Returns True if allowed."""
+        if self._limit <= 0:  # 0 = unlimited
+            return True
+        with self._lock:
+            self._maybe_reset()
+            if self._count >= self._limit:
+                return False
+            self._count += 1
+            return True
+
+    @property
+    def remaining(self) -> int:
+        """Number of calls remaining today."""
+        if self._limit <= 0:
+            return -1  # unlimited
+        with self._lock:
+            self._maybe_reset()
+            return max(0, self._limit - self._count)
+
+
+# Module-level singleton — shared across all requests in this process
+_daily_limiter: Optional[DailyCallLimiter] = None
+
+
+def _get_daily_limiter() -> DailyCallLimiter:
+    global _daily_limiter
+    if _daily_limiter is None:
+        settings = get_settings()
+        _daily_limiter = DailyCallLimiter(settings.gemini_daily_limit)
+        logger.info(f"Gemini daily limit set to {settings.gemini_daily_limit} calls/day")
+    return _daily_limiter
 
 
 class ReceiptItem:
@@ -113,6 +169,15 @@ Return ONLY valid JSON, no other text."""
             
         Retries up to 3 times with exponential backoff on transient errors.
         """
+        # Check daily call limit
+        limiter = _get_daily_limiter()
+        if not limiter.acquire():
+            remaining = limiter.remaining
+            logger.warning(f"Gemini daily limit reached ({limiter._limit} calls/day)")
+            raise RuntimeError(
+                "Daily receipt scan limit reached. Please try again tomorrow."
+            )
+        
         if not self.api_key:
             raise ValueError(
                 "GEMINI_API_KEY not configured. "
