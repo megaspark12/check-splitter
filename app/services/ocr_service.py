@@ -4,12 +4,14 @@ AI-powered Receipt Recognition Service using Google Gemini.
 Uses Gemini's vision capabilities to extract structured data from receipt images.
 Includes retry logic with exponential backoff for API resilience.
 """
+from __future__ import annotations
+
 import io
 import json
 import asyncio
 import threading
 from datetime import date
-from typing import List, Dict, Any, Optional
+from typing import Any
 from decimal import Decimal
 from PIL import Image
 import tenacity
@@ -62,7 +64,7 @@ class DailyCallLimiter:
 
 
 # Module-level singleton — shared across all requests in this process
-_daily_limiter: Optional[DailyCallLimiter] = None
+_daily_limiter: DailyCallLimiter | None = None
 
 
 def _get_daily_limiter() -> DailyCallLimiter:
@@ -156,7 +158,7 @@ Return ONLY valid JSON, no other text."""
         ),
         reraise=True,
     )
-    async def parse_receipt(self, image_bytes: bytes) -> Dict[str, Any]:
+    async def parse_receipt(self, image_bytes: bytes) -> dict[str, Any]:
         """
         Parse a receipt image and extract structured data.
         
@@ -242,7 +244,7 @@ Return ONLY valid JSON, no other text."""
                 "error": f"Failed to parse AI response: {str(e)}"
             }
     
-    def _validate_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
+    def _validate_result(self, result: dict[str, Any]) -> dict[str, Any]:
         """Validate and clean the parsed result."""
         validated_items = []
         
@@ -292,7 +294,7 @@ class OCRService:
     def __init__(self):
         self.parser = GeminiReceiptParser()
     
-    async def process_receipt(self, image_bytes: bytes) -> Dict[str, Any]:
+    async def process_receipt(self, image_bytes: bytes) -> dict[str, Any]:
         """
         Process a receipt image and extract items.
         

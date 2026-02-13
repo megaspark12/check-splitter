@@ -1,16 +1,17 @@
 """Discount schemas."""
+from __future__ import annotations
+
 from decimal import Decimal
-from typing import Optional
 from pydantic import BaseModel, Field, field_validator
 from app.models.discount import DiscountType
 
 
 class DiscountCreate(BaseModel):
     """Schema for creating a discount."""
-    name: Optional[str] = Field(None, max_length=100)  # Optional - will be auto-generated if not provided
+    name: str | None = Field(None, max_length=100)  # Optional - will be auto-generated if not provided
     discount_type: DiscountType
     value: Decimal = Field(..., gt=0)
-    participant_id: Optional[str] = None  # None = applies to entire bill
+    participant_id: str | None = None  # None = applies to entire bill
     
     @field_validator("value")
     @classmethod
@@ -24,18 +25,18 @@ class DiscountCreate(BaseModel):
 
 class DiscountUpdate(BaseModel):
     """Schema for updating a discount."""
-    name: Optional[str] = Field(None, min_length=1, max_length=100)
-    discount_type: Optional[DiscountType] = None
-    value: Optional[Decimal] = Field(None, gt=0)
-    participant_id: Optional[str] = None  # Can update target
+    name: str | None = Field(None, min_length=1, max_length=100)
+    discount_type: DiscountType | None = None
+    value: Decimal | None = Field(None, gt=0)
+    participant_id: str | None = None  # Can update target
 
 
 class DiscountResponse(BaseModel):
     """Schema for discount response."""
     id: str
     session_id: str
-    participant_id: Optional[str] = None
-    participant_name: Optional[str] = None  # Included for convenience
+    participant_id: str | None = None
+    participant_name: str | None = None  # Included for convenience
     name: str
     discount_type: DiscountType
     value: Decimal

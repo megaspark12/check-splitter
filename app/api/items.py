@@ -3,7 +3,8 @@ Items API routes.
 
 Handles CRUD operations for receipt items.
 """
-from typing import List
+from __future__ import annotations
+
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,7 +19,7 @@ from app.api.dependencies import get_session_or_404, require_host_token
 router = APIRouter(prefix="/api/sessions/{code}/items", tags=["items"])
 
 
-@router.get("", response_model=List[ItemResponse])
+@router.get("", response_model=list[ItemResponse])
 async def list_items(
     code: str,
     session: Session = Depends(get_session_or_404),

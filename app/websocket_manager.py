@@ -1,7 +1,8 @@
 """
 WebSocket connection manager for real-time session updates.
 """
-from typing import Dict, Set
+from __future__ import annotations
+
 from fastapi import WebSocket
 import json
 import asyncio
@@ -16,7 +17,7 @@ class ConnectionManager:
     
     def __init__(self):
         # Map of session_code -> set of WebSocket connections
-        self.active_connections: Dict[str, Set[WebSocket]] = {}
+        self.active_connections: dict[str, set[WebSocket]] = {}
         self._lock = asyncio.Lock()
     
     async def connect(self, websocket: WebSocket, session_code: str):

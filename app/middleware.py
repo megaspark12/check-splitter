@@ -1,4 +1,6 @@
 """Production middleware for security, logging, and rate limiting."""
+from __future__ import annotations
+
 import time
 from typing import Callable
 from collections import defaultdict

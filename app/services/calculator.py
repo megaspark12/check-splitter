@@ -4,8 +4,10 @@ Bill Calculator Service.
 Handles all calculations for splitting bills between participants,
 including item sharing, tax distribution, tip calculation, and discounts.
 """
+from __future__ import annotations
+
 from decimal import Decimal, ROUND_HALF_UP
-from typing import Dict, List, Any, Optional, Protocol
+from typing import Any, Protocol
 
 
 class ItemProtocol(Protocol):
@@ -29,8 +31,8 @@ class ParticipantProtocol(Protocol):
     """Protocol for participant-like objects."""
     id: str
     name: str
-    tip_percentage: Optional[Decimal]
-    tip_amount: Optional[Decimal]
+    tip_percentage: Decimal | None
+    tip_amount: Decimal | None
 
 
 class DiscountProtocol(Protocol):
@@ -39,7 +41,7 @@ class DiscountProtocol(Protocol):
     name: str
     discount_type: str  # "percentage" or "fixed"
     value: Decimal
-    participant_id: Optional[str]  # None = entire bill
+    participant_id: str | None  # None = entire bill
 
 
 class BillCalculator:
@@ -70,8 +72,8 @@ class BillCalculator:
     def _distribute_with_remainder(
         self, 
         total: Decimal, 
-        shares: Dict[str, int]
-    ) -> Dict[str, Decimal]:
+        shares: dict[str, int]
+    ) -> dict[str, Decimal]:
         """
         Distribute a total amount based on share counts, handling remainders.
         
@@ -112,8 +114,8 @@ class BillCalculator:
     def calculate_item_share(
         self, 
         item: ItemProtocol, 
-        assignments: List[AssignmentProtocol]
-    ) -> Dict[str, Decimal]:
+        assignments: list[AssignmentProtocol]
+    ) -> dict[str, Decimal]:
         """
         Calculate how much each participant pays for a single item.
         
@@ -141,8 +143,8 @@ class BillCalculator:
     def calculate_tip(
         self,
         subtotal: Decimal,
-        tip_percentage: Optional[Decimal],
-        tip_amount: Optional[Decimal]
+        tip_percentage: Decimal | None,
+        tip_amount: Decimal | None
     ) -> Decimal:
         """
         Calculate tip for a participant.
@@ -170,9 +172,9 @@ class BillCalculator:
     
     def distribute_tax(
         self,
-        participant_subtotals: Dict[str, Decimal],
+        participant_subtotals: dict[str, Decimal],
         tax_total: Decimal
-    ) -> Dict[str, Decimal]:
+    ) -> dict[str, Decimal]:
         """
         Distribute tax proportionally based on each participant's subtotal.
         
@@ -235,11 +237,11 @@ class BillCalculator:
     
     def calculate_full_split(
         self,
-        items: List[ItemProtocol],
-        participants: List[ParticipantProtocol],
-        assignments: List[AssignmentProtocol],
-        discounts: Optional[List[DiscountProtocol]] = None
-    ) -> Dict[str, Any]:
+        items: list[ItemProtocol],
+        participants: list[ParticipantProtocol],
+        assignments: list[AssignmentProtocol],
+        discounts: list[DiscountProtocol] | None = None
+    ) -> dict[str, Any]:
         """
         Calculate the full bill split for all participants.
         

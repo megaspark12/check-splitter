@@ -1,6 +1,7 @@
 """Application configuration."""
+from __future__ import annotations
+
 import sys
-from typing import List
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 
@@ -73,7 +74,7 @@ class Settings(BaseSettings):
         return self.environment.lower() == "development"
     
     @property
-    def cors_origins_list(self) -> List[str]:
+    def cors_origins_list(self) -> list[str]:
         """Parse CORS origins from comma-separated string."""
         if self.cors_origins == "*":
             return ["*"]

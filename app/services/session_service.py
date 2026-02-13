@@ -3,11 +3,12 @@ Session management service.
 
 Handles session creation, retrieval, and management.
 """
+from __future__ import annotations
+
 import random
 import secrets
 import string
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Tuple
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -44,7 +45,7 @@ class SessionService:
                 return code
         raise RuntimeError("Could not generate unique session code")
     
-    async def create_session(self, host_name: str, network_hash: str = None, location_hash: str = None) -> Tuple[Session, str]:
+    async def create_session(self, host_name: str, network_hash: str = None, location_hash: str = None) -> tuple[Session, str]:
         """
         Create a new session with the host as the first participant.
         
@@ -98,7 +99,7 @@ class SessionService:
         result = await self.db.execute(stmt)
         return result.scalar_one(), host_token
     
-    async def get_session_by_code(self, code: str) -> Optional[Session]:
+    async def get_session_by_code(self, code: str) -> Session | None:
         """
         Get a session by its code.
         
@@ -145,7 +146,7 @@ class SessionService:
         self, 
         code: str, 
         status: SessionStatus
-    ) -> Optional[Session]:
+    ) -> Session | None:
         """
         Update a session's status.
         

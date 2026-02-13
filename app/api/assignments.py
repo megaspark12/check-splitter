@@ -3,7 +3,8 @@ Assignments API routes.
 
 Handles item-to-participant assignments.
 """
-from typing import List
+from __future__ import annotations
+
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -21,7 +22,7 @@ from app.api.dependencies import get_session_or_404
 router = APIRouter(prefix="/api/sessions/{code}/assignments", tags=["assignments"])
 
 
-@router.get("", response_model=List[AssignmentResponse])
+@router.get("", response_model=list[AssignmentResponse])
 async def list_assignments(
     code: str,
     session: Session = Depends(get_session_or_404),
