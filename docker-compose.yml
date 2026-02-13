@@ -26,9 +26,10 @@ services:
       - SECRET_KEY=${SECRET_KEY:?SECRET_KEY is required}
       - DATABASE_URL=${DATABASE_URL:-sqlite+aiosqlite:///./data/check_splitter.db}
       - GEMINI_API_KEY=${GEMINI_API_KEY:?GEMINI_API_KEY is required}
-      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash-preview-05-20}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.0-flash}
+      - GEMINI_DAILY_LIMIT=${GEMINI_DAILY_LIMIT:-100}
       - CORS_ORIGINS=${CORS_ORIGINS:-*}
-      - RATE_LIMIT_PER_MINUTE=${RATE_LIMIT_PER_MINUTE:-60}
+      - RATE_LIMIT_PER_MINUTE=${RATE_LIMIT_PER_MINUTE:-180}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - LOG_FORMAT=${LOG_FORMAT:-json}
       - WORKERS=${WORKERS:-2}

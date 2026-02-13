@@ -31,7 +31,7 @@ Split restaurant bills fairly with friends — in seconds. Upload a receipt phot
 | **Backend** | Python 3.11+, FastAPI, async SQLAlchemy, SQLite (dev) / PostgreSQL (prod) |
 | **Frontend** | Vanilla HTML, CSS, JavaScript — no framework, no build step |
 | **Real-Time** | Native WebSockets via FastAPI |
-| **AI** | Google Gemini 2.5 Flash for receipt OCR |
+| **AI** | Google Gemini 2.0 Flash for receipt OCR |
 | **Infra** | Docker, Docker Compose, Alembic migrations |
 
 ## 🚀 Quick Start
@@ -108,10 +108,15 @@ All settings are in `.env` (see `.env.example` for defaults):
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `GEMINI_API_KEY` | Google Gemini API key | *required* |
+| `GEMINI_MODEL` | Gemini model for receipt OCR | `gemini-2.0-flash` |
+| `GEMINI_DAILY_LIMIT` | Max API calls per day (0 = unlimited) | `100` |
 | `DATABASE_URL` | SQLite or PostgreSQL connection string | `sqlite+aiosqlite:///./check_splitter.db` |
 | `SESSION_EXPIRY_MINUTES` | Auto-cleanup inactive sessions | `15` |
 | `MAX_UPLOAD_SIZE_MB` | Max receipt image size | `10` |
+| `WORKERS` | Gunicorn/uvicorn workers | `2` |
+| `RATE_LIMIT_PER_MINUTE` | API rate limit | `180` |
 | `LOG_LEVEL` | Logging verbosity | `INFO` |
+| `LOG_FORMAT` | Log output format | `json` |
 
 ## 📄 License
 

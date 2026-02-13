@@ -183,6 +183,8 @@ All environment variables are set via Terraform (Cloud Run env + Secret Manager)
 | `DB_NAME` | Terraform env | `check_splitter` |
 | `DB_PASS` | Secret Manager | Auto-generated 32-char password |
 | `GEMINI_API_KEY` | Secret Manager | Your Gemini API key |
+| `GEMINI_MODEL` | Terraform env | Gemini model name (default: `gemini-2.0-flash`) |
+| `GEMINI_DAILY_LIMIT` | Terraform env | Max API calls per day, 0 = unlimited (default: `100`) |
 | `SECRET_KEY` | Secret Manager | Auto-generated 64-char key |
 | `LOG_FORMAT` | Terraform env | `json` — structured logging for Cloud Logging |
 | `LOG_LEVEL` | Terraform env | `INFO` (configurable via `terraform.tfvars`) |
@@ -297,6 +299,121 @@ terraform destroy
 ```
 
 This removes all GCP resources. Data in Cloud SQL and GCS will be permanently deleted.
+
+---
+
+## Ways to Run the App
+
+There are four ways to run Check Splitter, depending on your use case:
+
+### 1. Local Development (Python + uvicorn)
+
+The simplest way to run during development. Uses SQLite and local file storage.
+
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Configure
+cp .env.example .env
+# Edit .env — set GEMINI_API_KEY at minimum
+
+# Run with auto-reload
+make dev
+# Or directly:
+python run.py
+```
+
+- **URL**: http://localhost:8000
+- **Database**: SQLite file (`check_splitter.db`)
+- **Receipt storage**: Local `uploads/` directory
+- **Hot reload**: Yes (uvicorn `--reload`)
+- **Use for**: Day-to-day development, debugging, running tests
+
+### 2. Docker (single container)
+
+Runs the production Docker image locally — useful for testing the container before deploying.
+
+```bash
+# Build the image
+make build
+
+# Run it
+make run-docker
+```
+
+Or manually:
+
+```bash
+docker build -t check-splitter:local .
+docker run --rm -p 8000:8000 \
+  --env-file .env \
+  -e ENVIRONMENT=development \
+  -e RUN_MIGRATIONS=true \
+  check-splitter:local
+```
+
+- **URL**: http://localhost:8000
+- **Database**: SQLite inside the container (ephemeral unless you mount a volume)
+- **Use for**: Verifying the Docker build works, testing `entrypoint.sh` migration logic
+
+### 3. Docker Compose
+
+Full local stack with optional PostgreSQL — closest to production without GCP.
+
+```bash
+# Configure
+cp .env.example .env
+# Edit .env — set GEMINI_API_KEY and SECRET_KEY
+
+# Run (SQLite mode)
+docker compose up -d
+
+# Run with PostgreSQL
+POSTGRES_PASSWORD=mypassword docker compose --profile postgres up -d
+# Then set DATABASE_URL=postgresql+asyncpg://checksplitter:mypassword@postgres:5432/checksplitter in .env
+```
+
+- **URL**: http://localhost:8000
+- **Database**: SQLite by default, PostgreSQL with `--profile postgres`
+- **Receipt storage**: Docker volume (`app-uploads`)
+- **Persistent**: Yes (data survives `docker compose down`, removed with `docker compose down -v`)
+- **Use for**: Integration testing, demoing, running with PostgreSQL locally
+
+### 4. GCP Production (Cloud Run + Terraform)
+
+Full production deployment on Google Cloud. See the detailed steps above.
+
+```bash
+# One-time setup
+cd terraform
+cp terraform.tfvars.example terraform.tfvars
+# Edit terraform.tfvars with your project_id, gemini_api_key, etc.
+terraform init && terraform apply
+
+# Deploy (from project root)
+make deploy
+```
+
+- **URL**: `https://check-splitter-XXXX.europe-west1.run.app` (from `terraform output`)
+- **Database**: Cloud SQL PostgreSQL (private VPC, automated backups)
+- **Receipt storage**: GCS bucket (30-day lifecycle)
+- **Secrets**: Secret Manager (API keys, DB password)
+- **Scaling**: 0 → N instances (configurable via `terraform.tfvars`)
+- **Use for**: Production, sharing with real users
+
+### Quick Comparison
+
+| | Local | Docker | Compose | GCP Production |
+|---|---|---|---|---|
+| **Setup time** | 2 min | 3 min | 3 min | 20 min |
+| **Database** | SQLite | SQLite | SQLite or PostgreSQL | Cloud SQL PostgreSQL |
+| **Hot reload** | Yes | No | No | No |
+| **Cost** | Free | Free | Free | ~$22–27/mo |
+| **Scaling** | Single process | Single container | Single container | Auto-scaling |
+| **Command** | `make dev` | `make run-docker` | `docker compose up` | `make deploy` |
+
+---
 
 ## File Reference
 

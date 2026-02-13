@@ -15,12 +15,24 @@ variable "gemini_api_key" {
   sensitive   = true
 }
 
+variable "gemini_model" {
+  description = "Gemini model name for receipt OCR (e.g., gemini-2.0-flash)"
+  type        = string
+  default     = "gemini-2.0-flash"
+}
+
+variable "gemini_daily_limit" {
+  description = "Max Gemini API calls per day (0 = unlimited)"
+  type        = number
+  default     = 100
+}
+
 # ====== Region / Zone ======
 
 variable "region" {
   description = "GCP region for all resources"
   type        = string
-  default     = "us-central1"
+  default     = "europe-west1"
 }
 
 # ====== Cloud Run ======

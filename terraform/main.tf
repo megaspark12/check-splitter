@@ -393,6 +393,14 @@ resource "google_cloud_run_v2_service" "app" {
         name = "CORS_ORIGINS"
         value = join(",", var.cors_origins)
       }
+      env {
+        name  = "GEMINI_MODEL"
+        value = var.gemini_model
+      }
+      env {
+        name  = "GEMINI_DAILY_LIMIT"
+        value = tostring(var.gemini_daily_limit)
+      }
 
       # Secrets from Secret Manager
       env {

@@ -78,7 +78,7 @@ deploy: ## Deploy to Cloud Run via Cloud Build
 	gcloud builds submit --config=cloudbuild.yaml .
 
 deploy-manual: ## Manual deploy: build + push + deploy
-	$(eval REGION := $(shell cd $(TERRAFORM_DIR) && terraform output -raw cloud_run_url 2>/dev/null | grep -oP '[\w-]+(?=\.run\.app)' || echo "us-central1"))
+	$(eval REGION := $(shell cd $(TERRAFORM_DIR) && terraform output -raw cloud_run_url 2>/dev/null | grep -oP '[\w-]+(?=\.run\.app)' || echo "europe-west1"))
 	$(eval PROJECT := $(shell gcloud config get-value project))
 	$(eval IMAGE := $(REGION)-docker.pkg.dev/$(PROJECT)/check-splitter/app:manual)
 	docker build -t $(IMAGE) .

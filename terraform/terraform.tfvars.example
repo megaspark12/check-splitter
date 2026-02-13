@@ -8,8 +8,12 @@
 project_id     = "your-gcp-project-id"
 gemini_api_key = "your-gemini-api-key"
 
-# Region (default: us-central1)
-# region = "us-central1"
+# Gemini model for receipt OCR
+# gemini_model = "gemini-2.0-flash"
+# gemini_daily_limit = 100  # Max API calls per day (0 = unlimited)
+
+# Region (default: europe-west1)
+# region = "europe-west1"
 
 # Cloud Run scaling
 # min_instances = 0    # Set to 1+ to avoid cold starts
