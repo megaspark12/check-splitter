@@ -3,13 +3,14 @@ Sessions API routes.
 
 Handles session creation, retrieval, QR codes, summaries, and WebSocket connections.
 """
+from __future__ import annotations
+
 import uuid
 import hashlib
 from pathlib import Path
 from datetime import datetime, timezone
 from decimal import Decimal
 from dataclasses import dataclass
-from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile, File, Request, WebSocket, WebSocketDisconnect, Query
 from sqlalchemy import select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,6 +32,41 @@ from app.websocket_manager import manager
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 logger = get_logger("api.sessions")
+
+
+# Adapter dataclasses for BillCalculator (prefixed with _ to avoid pytest collection)
+@dataclass
+class _Item:
+    id: str
+    name: str
+    price: Decimal
+    quantity: int
+    is_tax: bool
+    is_tip_suggestion: bool
+
+
+@dataclass
+class _Participant:
+    id: str
+    name: str
+    tip_percentage: Decimal | None
+    tip_amount: Decimal | None
+
+
+@dataclass
+class _Assignment:
+    item_id: str
+    participant_id: str
+    share_count: int
+
+
+@dataclass
+class _Discount:
+    id: str
+    name: str
+    discount_type: str
+    value: Decimal
+    participant_id: str | None
 
 
 @router.websocket("/ws/{code}")
@@ -87,8 +123,8 @@ def get_client_network_hash(request: Request) -> str:
 @router.get("/nearby", response_model=NearbySessionsResponse)
 async def get_nearby_sessions(
     request: Request,
-    lat: Optional[float] = Query(None, ge=-90, le=90, description="GPS latitude"),
-    lng: Optional[float] = Query(None, ge=-180, le=180, description="GPS longitude"),
+    lat: float | None = Query(None, ge=-90, le=90, description="GPS latitude"),
+    lng: float | None = Query(None, ge=-180, le=180, description="GPS longitude"),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -425,37 +461,6 @@ async def get_session_summary(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     
-    # Build data structures for calculator using dataclasses
-    @dataclass
-    class _Item:
-        id: str
-        name: str
-        price: Decimal
-        quantity: int
-        is_tax: bool
-        is_tip_suggestion: bool
-
-    @dataclass
-    class _Participant:
-        id: str
-        name: str
-        tip_percentage: Optional[Decimal]
-        tip_amount: Optional[Decimal]
-
-    @dataclass
-    class _Assignment:
-        item_id: str
-        participant_id: str
-        share_count: int
-
-    @dataclass
-    class _Discount:
-        id: str
-        name: str
-        discount_type: str
-        value: Decimal
-        participant_id: Optional[str]
-
     items = [
         _Item(
             id=item.id,
