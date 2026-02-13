@@ -6,7 +6,6 @@ Includes retry logic with exponential backoff for API resilience.
 """
 import io
 import json
-import base64
 import asyncio
 import threading
 from datetime import date
@@ -195,7 +194,6 @@ Return ONLY valid JSON, no other text."""
         model = self._get_client()
         
         # Call Gemini with the image (run in thread to avoid blocking event loop)
-        import asyncio
         try:
             response = await asyncio.wait_for(
                 asyncio.to_thread(

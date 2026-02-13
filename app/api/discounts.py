@@ -3,9 +3,8 @@ Discounts API routes.
 
 Handles discount creation, updates, and deletion for sessions.
 """
-from datetime import datetime, timezone
 from typing import List
-from fastapi import APIRouter, Depends, Header, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -16,50 +15,25 @@ from app.models.discount import Discount
 from app.models.session import Session
 from app.models.participant import Participant
 from app.schemas.discount import DiscountCreate, DiscountUpdate, DiscountResponse
+from app.api.dependencies import get_session_or_404, require_host_token
 
-router = APIRouter(prefix="/api/sessions/{session_code}/discounts", tags=["discounts"])
-
-
-async def get_session_by_code(db: AsyncSession, code: str) -> Session:
-    """Get session by code with discounts loaded. Checks expiry."""
-    result = await db.execute(
-        select(Session)
-        .options(selectinload(Session.discounts).selectinload(Discount.participant))
-        .where(Session.code == code.upper())
-    )
-    session = result.scalar_one_or_none()
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
-    if session.expires_at:
-        now = datetime.now(timezone.utc)
-        # Handle both naive and aware datetimes
-        expires_at = session.expires_at
-        if expires_at.tzinfo is None:
-            expires_at = expires_at.replace(tzinfo=timezone.utc)
-        if expires_at < now:
-            raise HTTPException(status_code=410, detail="Session has expired")
-    return session
-
-
-async def get_session_with_host_auth(
-    db: AsyncSession, code: str, x_host_token: str = None
-) -> Session:
-    """Get session by code, validate host token. For destructive operations."""
-    session = await get_session_by_code(db, code)
-    if not x_host_token:
-        raise HTTPException(status_code=401, detail="Host token required")
-    if not session.verify_host_token(x_host_token):
-        raise HTTPException(status_code=403, detail="Invalid host token")
-    return session
+router = APIRouter(prefix="/api/sessions/{code}/discounts", tags=["discounts"])
 
 
 @router.get("", response_model=List[DiscountResponse])
 async def list_discounts(
-    session_code: str,
+    code: str,
+    session: Session = Depends(get_session_or_404),
     db: AsyncSession = Depends(get_db)
 ):
     """List all discounts for a session."""
-    session = await get_session_by_code(db, session_code)
+    # Reload with discount relationships
+    result = await db.execute(
+        select(Session)
+        .options(selectinload(Session.discounts).selectinload(Discount.participant))
+        .where(Session.id == session.id)
+    )
+    session = result.scalar_one()
     
     return [
         DiscountResponse(
@@ -77,14 +51,13 @@ async def list_discounts(
 
 @router.post("", status_code=201, response_model=DiscountResponse)
 async def create_discount(
-    session_code: str,
+    code: str,
     discount_data: DiscountCreate,
     background_tasks: BackgroundTasks,
+    session: Session = Depends(require_host_token),
     db: AsyncSession = Depends(get_db),
-    x_host_token: str = Header(default=None),
 ):
     """Create a new discount for a session. Requires host token."""
-    session = await get_session_with_host_auth(db, session_code, x_host_token)
     
     # Validate participant_id if provided
     participant = None
@@ -126,7 +99,7 @@ async def create_discount(
     await db.refresh(discount)
     
     # Notify all connected clients
-    background_tasks.add_task(manager.notify_session_update, session_code.upper())
+    background_tasks.add_task(manager.notify_session_update, code.upper())
     
     return DiscountResponse(
         id=discount.id,
@@ -141,15 +114,14 @@ async def create_discount(
 
 @router.put("/{discount_id}", response_model=DiscountResponse)
 async def update_discount(
-    session_code: str,
+    code: str,
     discount_id: str,
     discount_data: DiscountUpdate,
     background_tasks: BackgroundTasks,
+    session: Session = Depends(require_host_token),
     db: AsyncSession = Depends(get_db),
-    x_host_token: str = Header(default=None),
 ):
     """Update a discount. Requires host token."""
-    session = await get_session_with_host_auth(db, session_code, x_host_token)
     
     # Find the discount
     result = await db.execute(
@@ -196,7 +168,7 @@ async def update_discount(
     discount = result.scalar_one()
     
     # Notify all connected clients
-    background_tasks.add_task(manager.notify_session_update, session_code.upper())
+    background_tasks.add_task(manager.notify_session_update, code.upper())
     
     return DiscountResponse(
         id=discount.id,
@@ -211,14 +183,13 @@ async def update_discount(
 
 @router.delete("/{discount_id}", status_code=204)
 async def delete_discount(
-    session_code: str,
+    code: str,
     discount_id: str,
     background_tasks: BackgroundTasks,
+    session: Session = Depends(require_host_token),
     db: AsyncSession = Depends(get_db),
-    x_host_token: str = Header(default=None),
 ):
     """Delete a discount. Requires host token."""
-    session = await get_session_with_host_auth(db, session_code, x_host_token)
     
     result = await db.execute(
         select(Discount).where(Discount.id == discount_id, Discount.session_id == session.id)
@@ -231,4 +202,4 @@ async def delete_discount(
     await db.commit()
     
     # Notify all connected clients
-    background_tasks.add_task(manager.notify_session_update, session_code.upper())
+    background_tasks.add_task(manager.notify_session_update, code.upper())

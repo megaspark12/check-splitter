@@ -88,7 +88,6 @@ class SessionService:
         await self.db.commit()
         
         # Reload with relationships
-        from app.models.discount import Discount
         stmt = (
             select(Session)
             .where(Session.id == session.id)

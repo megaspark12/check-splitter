@@ -3,13 +3,12 @@ Sessions API routes.
 
 Handles session creation, retrieval, QR codes, summaries, and WebSocket connections.
 """
-import os
 import uuid
 import hashlib
-import aiofiles
 from pathlib import Path
 from datetime import datetime, timezone
 from decimal import Decimal
+from dataclasses import dataclass
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile, File, Request, WebSocket, WebSocketDisconnect, Query
 from sqlalchemy import select, or_
@@ -426,47 +425,81 @@ async def get_session_summary(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     
-    # Build data structures for calculator
-    items = []
-    for item in session.items:
-        items.append(type('Item', (), {
-            'id': item.id,
-            'name': item.name,
-            'price': item.price,
-            'quantity': item.quantity,
-            'is_tax': item.is_tax,
-            'is_tip_suggestion': item.is_tip_suggestion,
-        })())
+    # Build data structures for calculator using dataclasses
+    @dataclass
+    class _Item:
+        id: str
+        name: str
+        price: Decimal
+        quantity: int
+        is_tax: bool
+        is_tip_suggestion: bool
+
+    @dataclass
+    class _Participant:
+        id: str
+        name: str
+        tip_percentage: Optional[Decimal]
+        tip_amount: Optional[Decimal]
+
+    @dataclass
+    class _Assignment:
+        item_id: str
+        participant_id: str
+        share_count: int
+
+    @dataclass
+    class _Discount:
+        id: str
+        name: str
+        discount_type: str
+        value: Decimal
+        participant_id: Optional[str]
+
+    items = [
+        _Item(
+            id=item.id,
+            name=item.name,
+            price=item.price,
+            quantity=item.quantity,
+            is_tax=item.is_tax,
+            is_tip_suggestion=item.is_tip_suggestion,
+        )
+        for item in session.items
+    ]
     
-    participants = []
-    for p in session.participants:
-        participants.append(type('Participant', (), {
-            'id': p.id,
-            'name': p.name,
-            'tip_percentage': p.tip_percentage,
-            'tip_amount': p.tip_amount,
-        })())
+    participants = [
+        _Participant(
+            id=p.id,
+            name=p.name,
+            tip_percentage=p.tip_percentage,
+            tip_amount=p.tip_amount,
+        )
+        for p in session.participants
+    ]
     
     # Flatten all assignments
-    assignments = []
-    for item in session.items:
-        for assignment in item.assignments:
-            assignments.append(type('Assignment', (), {
-                'item_id': assignment.item_id,
-                'participant_id': assignment.participant_id,
-                'share_count': assignment.share_count,
-            })())
+    assignments = [
+        _Assignment(
+            item_id=assignment.item_id,
+            participant_id=assignment.participant_id,
+            share_count=assignment.share_count,
+        )
+        for item in session.items
+        for assignment in item.assignments
+    ]
     
     # Build discounts list
-    discounts = []
-    for d in session.discounts:
-        discounts.append(type('Discount', (), {
-            'id': d.id,
-            'name': d.name,
-            'discount_type': d.discount_type.value,  # Convert enum to string
-            'value': d.value,
-            'participant_id': d.participant_id,
-        })())
+    discounts = [
+        _Discount(
+            id=d.id,
+            name=d.name,
+            discount_type=d.discount_type.value,  # Convert enum to string
+            value=d.value,
+            participant_id=d.participant_id,
+        )
+        for d in session.discounts
+    ]
     
     # Calculate split
     calculator = BillCalculator()

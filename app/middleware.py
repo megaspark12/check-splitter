@@ -7,7 +7,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response, JSONResponse
 
-from app.logging_config import get_logger, generate_request_id, set_request_id, get_request_id
+from app.logging_config import get_logger, generate_request_id, set_request_id
 from app.config import get_settings
 
 logger = get_logger("middleware")

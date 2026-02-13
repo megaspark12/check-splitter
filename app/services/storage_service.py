@@ -3,8 +3,6 @@ Storage backend abstraction for receipt image uploads.
 
 Supports local filesystem (development) and Google Cloud Storage (production).
 """
-import os
-import uuid
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Optional

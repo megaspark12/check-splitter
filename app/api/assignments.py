@@ -28,7 +28,6 @@ async def list_assignments(
     db: AsyncSession = Depends(get_db)
 ):
     """List all assignments in a session."""
-    session = await get_session_or_404(code, db)
     
     # Get all assignments for items in this session
     result = await db.execute(
