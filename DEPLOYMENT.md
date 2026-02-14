@@ -366,18 +366,21 @@ Full local stack with optional PostgreSQL — closest to production without GCP.
 cp .env.example .env
 # Edit .env — set GEMINI_API_KEY and SECRET_KEY
 
-# Run (SQLite mode)
+# Run (SQLite mode — data persisted in Docker volume)
 docker compose up -d
 
 # Run with PostgreSQL
-POSTGRES_PASSWORD=mypassword docker compose --profile postgres up -d
-# Then set DATABASE_URL=postgresql+asyncpg://checksplitter:mypassword@postgres:5432/checksplitter in .env
+docker compose --profile postgres up -d
+# Then uncomment and set in .env:
+# DATABASE_URL=postgresql+asyncpg://checksplitter:postgres@postgres:5432/checksplitter
+# (default password is 'postgres'; override with POSTGRES_PASSWORD in .env)
 ```
 
 - **URL**: http://localhost:8000
-- **Database**: SQLite by default, PostgreSQL with `--profile postgres`
+- **Database**: SQLite by default (in `app-data` volume), PostgreSQL with `--profile postgres`
 - **Receipt storage**: Docker volume (`app-uploads`)
 - **Persistent**: Yes (data survives `docker compose down`, removed with `docker compose down -v`)
+- **Migrations**: Run automatically on startup via `entrypoint.sh`
 - **Use for**: Integration testing, demoing, running with PostgreSQL locally
 
 ### 4. GCP Production (Cloud Run + Terraform)
@@ -411,7 +414,7 @@ make deploy
 | **Hot reload** | Yes | No | No | No |
 | **Cost** | Free | Free | Free | ~$22–27/mo |
 | **Scaling** | Single process | Single container | Single container | Auto-scaling |
-| **Command** | `make dev` | `make run-docker` | `docker compose up` | `make deploy` |
+| **Command** | `make dev` | `make run-docker` | `docker compose up -d` | `make deploy` |
 
 ---
 

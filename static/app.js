@@ -789,6 +789,9 @@ async function createSession(hostName) {
             body: JSON.stringify(body)
         });
         
+        // Reset UI from any previous session before loading the new one
+        resetSessionUI();
+
         currentSession = session;
         isHost = true;
         
@@ -1114,6 +1117,39 @@ function setupUploadHandlers() {
     }
 
     processBtn.addEventListener('click', uploadReceipt);
+
+    // Lightbox: click preview image to zoom fullscreen
+    preview.addEventListener('click', () => {
+        if (preview.hidden || !preview.src) return;
+        openImageLightbox(preview.src);
+    });
+    preview.style.cursor = 'zoom-in';
+}
+
+function openImageLightbox(src) {
+    // Create fullscreen overlay
+    const overlay = document.createElement('div');
+    overlay.className = 'lightbox-overlay';
+    overlay.innerHTML = `
+        <button class="lightbox-close" aria-label="Close">&times;</button>
+        <img src="${src}" class="lightbox-image" alt="Receipt">
+    `;
+    document.body.appendChild(overlay);
+
+    // Trigger animation
+    requestAnimationFrame(() => overlay.classList.add('active'));
+
+    // Close on overlay click, close button, or Escape key
+    const close = () => {
+        overlay.classList.remove('active');
+        setTimeout(() => overlay.remove(), 200);
+    };
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay || e.target.classList.contains('lightbox-close')) close();
+    });
+    document.addEventListener('keydown', function handler(e) {
+        if (e.key === 'Escape') { close(); document.removeEventListener('keydown', handler); }
+    });
 }
 
 async function uploadReceipt() {
@@ -1233,14 +1269,64 @@ function displayItems(items, participants = []) {
     `).join('');
 }
 
+// Undo stack for deleted items — persistent across deletions (like Ctrl+Z)
+let deletedItemsStack = [];
+
+function updateUndoButton() {
+    const btn = document.getElementById('undo-delete-btn');
+    if (!btn) return;
+    if (deletedItemsStack.length > 0) {
+        const count = deletedItemsStack.length;
+        btn.querySelector('span').textContent = `↩ Undo${count > 1 ? ' (' + count + ')' : ''}`;
+        btn.hidden = false;
+    } else {
+        btn.hidden = true;
+    }
+}
+
 async function deleteItem(itemId) {
     try {
+        const item = currentSession.items.find(i => i.id === itemId);
+        if (item) {
+            deletedItemsStack.push({
+                name: item.name,
+                price: item.price,
+                quantity: item.quantity,
+                is_tax: item.is_tax || false,
+                is_tip_suggestion: item.is_tip_suggestion || false,
+                is_refund: item.is_refund || false
+            });
+        }
+
         await apiRequest(`/sessions/${currentSession.code}/items/${itemId}`, {
             method: 'DELETE'
         });
         await loadSession(currentSession.code);
+        updateUndoButton();
     } catch (error) {
+        deletedItemsStack.pop();
         showError('Failed to delete item: ' + error.message);
+    }
+}
+
+async function undoDeleteItem() {
+    const item = deletedItemsStack.pop();
+    if (!item) return;
+
+    const btn = document.getElementById('undo-delete-btn');
+    if (btn) btn.disabled = true;
+
+    try {
+        await apiRequest(`/sessions/${currentSession.code}/items`, {
+            method: 'POST',
+            body: JSON.stringify(item)
+        });
+        await loadSession(currentSession.code);
+        updateUndoButton();
+    } catch (error) {
+        showError('Failed to restore item: ' + error.message);
+    } finally {
+        if (btn) btn.disabled = false;
     }
 }
 
@@ -1419,6 +1505,70 @@ function setupCopyHandler() {
     });
 }
 
+// Reset all session UI to initial state
+function resetSessionUI() {
+    // Clear items
+    const itemsList = document.getElementById('items-list');
+    if (itemsList) itemsList.innerHTML = '';
+    const itemsSection = document.getElementById('items-section');
+    if (itemsSection) itemsSection.hidden = true;
+    const itemsCount = document.getElementById('items-count');
+    if (itemsCount) itemsCount.textContent = '0';
+
+    // Clear participants
+    const participantsList = document.getElementById('participants-list');
+    if (participantsList) participantsList.innerHTML = '';
+    const participantsCount = document.getElementById('participants-count');
+    if (participantsCount) participantsCount.textContent = '0';
+
+    // Clear summary
+    const summaryContent = document.getElementById('summary-content');
+    if (summaryContent) summaryContent.innerHTML = '';
+    const summarySection = document.getElementById('summary-section');
+    if (summarySection) summarySection.hidden = true;
+
+    // Clear discounts
+    const discountsList = document.getElementById('discounts-list');
+    if (discountsList) discountsList.innerHTML = '';
+
+    // Clear host total
+    const hostTotal = document.getElementById('host-total');
+    if (hostTotal) hostTotal.textContent = '';
+
+    // Clear upload state — reset preview, file inputs, process button, and header
+    const receiptPreview = document.getElementById('receipt-preview');
+    if (receiptPreview) { receiptPreview.src = ''; receiptPreview.hidden = true; }
+    const receiptInput = document.getElementById('receipt-input');
+    if (receiptInput) receiptInput.value = '';
+    const cameraInput = document.getElementById('camera-input');
+    if (cameraInput) cameraInput.value = '';
+    const processBtn = document.getElementById('process-btn');
+    if (processBtn) { processBtn.disabled = true; processBtn.hidden = false; }
+    const processingStatus = document.getElementById('processing-status');
+    if (processingStatus) processingStatus.hidden = true;
+    const uploadHeader = document.querySelector('#upload-section .card-header h2');
+    if (uploadHeader) uploadHeader.textContent = '📷 Upload Receipt';
+    selectedFile = null;
+
+    // Clear manual add item inputs
+    const newItemName = document.getElementById('new-item-name');
+    if (newItemName) newItemName.value = '';
+    const newItemPrice = document.getElementById('new-item-price');
+    if (newItemPrice) newItemPrice.value = '';
+
+    // Reset step indicator
+    updateStepIndicator(1);
+
+    // Clear undo stack
+    deletedItemsStack = [];
+    updateUndoButton();
+
+    // Reset tip state
+    currentTipPercentage = 10;
+    tipMode = 'percentage';
+    currentTipFixedAmount = 0;
+}
+
 // End Session
 function setupEndSessionHandler() {
     document.getElementById('end-session-btn').addEventListener('click', () => {
@@ -1433,6 +1583,7 @@ function setupEndSessionHandler() {
                     });
                     stopSync();
                     removeSessionFromHistory(sessionCode);
+                    resetSessionUI();
                     currentSession = null;
                     currentParticipant = null;
                     isHost = false;

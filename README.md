@@ -68,9 +68,9 @@ Open **http://localhost:8000** — you're ready to split bills!
 ```bash
 # Copy & configure env
 cp .env.example .env
-# Edit .env with your GEMINI_API_KEY and a SECRET_KEY
+# Edit .env — set GEMINI_API_KEY and SECRET_KEY
 
-# Run
+# Run (data persisted in Docker volumes)
 docker compose up -d
 ```
 
