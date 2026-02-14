@@ -1,8 +1,10 @@
 """Database configuration and session management."""
+
 from sqlalchemy import event
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.pool import AsyncAdaptedQueuePool
+
 from app.config import get_settings
 from app.logging_config import get_logger
 
@@ -11,6 +13,7 @@ logger = get_logger("database")
 
 class Base(DeclarativeBase):
     """Base class for all database models."""
+
     pass
 
 
@@ -18,10 +21,10 @@ def create_engine():
     """Create database engine with appropriate settings."""
     settings = get_settings()
     db_url = settings.effective_database_url
-    
+
     # Determine if using SQLite or PostgreSQL
     is_sqlite = "sqlite" in db_url.lower()
-    
+
     if is_sqlite:
         # SQLite doesn't support connection pooling the same way
         logger.info("Using SQLite database")
@@ -31,6 +34,7 @@ def create_engine():
             # SQLite specific: enable foreign keys
             connect_args={"check_same_thread": False} if "aiosqlite" in db_url else {},
         )
+
         # Enable WAL mode and foreign keys for better concurrency
         @event.listens_for(eng.sync_engine, "connect")
         def _set_sqlite_pragma(dbapi_connection, connection_record):
@@ -38,6 +42,7 @@ def create_engine():
             cursor.execute("PRAGMA journal_mode=WAL")
             cursor.execute("PRAGMA foreign_keys=ON")
             cursor.close()
+
         return eng
     else:
         # PostgreSQL with connection pooling
@@ -47,12 +52,12 @@ def create_engine():
             f"Using PostgreSQL ({safe_url}) with pool_size={settings.db_pool_size}, "
             f"max_overflow={settings.db_max_overflow}"
         )
-        
+
         connect_args = {}
         # Cloud SQL Unix socket support
         if "/cloudsql/" in db_url:
             logger.info("Cloud SQL Unix socket connection detected")
-        
+
         return create_async_engine(
             db_url,
             echo=settings.db_echo,
@@ -94,12 +99,14 @@ async def get_db() -> AsyncSession:
 async def init_db():
     """Initialize database tables."""
     settings = get_settings()
-    
+
     # In production with Alembic, we shouldn't auto-create tables
     if settings.is_production:
-        logger.info("Production mode: skipping auto table creation (use Alembic migrations)")
+        logger.info(
+            "Production mode: skipping auto table creation (use Alembic migrations)"
+        )
         return
-    
+
     logger.info("Development mode: auto-creating database tables")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -109,4 +116,3 @@ async def close_db():
     """Close database connections."""
     logger.info("Closing database connections")
     await engine.dispose()
-

@@ -1,18 +1,24 @@
 """Discount schemas."""
+
 from __future__ import annotations
 
 from decimal import Decimal
+
 from pydantic import BaseModel, Field, field_validator
+
 from app.models.discount import DiscountType
 
 
 class DiscountCreate(BaseModel):
     """Schema for creating a discount."""
-    name: str | None = Field(None, max_length=100)  # Optional - will be auto-generated if not provided
+
+    name: str | None = Field(
+        None, max_length=100
+    )  # Optional - will be auto-generated if not provided
     discount_type: DiscountType
     value: Decimal = Field(..., gt=0)
     participant_id: str | None = None  # None = applies to entire bill
-    
+
     @field_validator("value")
     @classmethod
     def validate_percentage(cls, v, info):
@@ -25,6 +31,7 @@ class DiscountCreate(BaseModel):
 
 class DiscountUpdate(BaseModel):
     """Schema for updating a discount."""
+
     name: str | None = Field(None, min_length=1, max_length=100)
     discount_type: DiscountType | None = None
     value: Decimal | None = Field(None, gt=0)
@@ -33,6 +40,7 @@ class DiscountUpdate(BaseModel):
 
 class DiscountResponse(BaseModel):
     """Schema for discount response."""
+
     id: str
     session_id: str
     participant_id: str | None = None
@@ -40,6 +48,6 @@ class DiscountResponse(BaseModel):
     name: str
     discount_type: DiscountType
     value: Decimal
-    
+
     class Config:
         from_attributes = True

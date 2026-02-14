@@ -1,11 +1,13 @@
 """Shared API dependencies."""
+
 from datetime import datetime, timezone
+
 from fastapi import Depends, Header, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.services.session_service import SessionService
 from app.models.session import Session
+from app.services.session_service import SessionService
 
 
 def check_session_expiry(session: Session) -> None:
@@ -36,7 +38,7 @@ async def require_host_token(
     x_host_token: str = Header(default=None),
 ) -> Session:
     """Dependency that validates the host token for destructive operations.
-    
+
     Returns the session if the token is valid, raises 401/403 otherwise.
     """
     service = SessionService(db)

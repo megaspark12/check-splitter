@@ -3,20 +3,21 @@ Discounts API routes.
 
 Handles discount creation, updates, and deletion for sessions.
 """
+
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.database import get_db
-from app.websocket_manager import manager
-from app.models.discount import Discount
-from app.models.session import Session
-from app.models.participant import Participant
-from app.schemas.discount import DiscountCreate, DiscountUpdate, DiscountResponse
 from app.api.dependencies import get_session_or_404, require_host_token
+from app.database import get_db
+from app.models.discount import Discount
+from app.models.participant import Participant
+from app.models.session import Session
+from app.schemas.discount import DiscountCreate, DiscountResponse, DiscountUpdate
+from app.websocket_manager import manager
 
 router = APIRouter(prefix="/api/sessions/{code}/discounts", tags=["discounts"])
 
@@ -25,7 +26,7 @@ router = APIRouter(prefix="/api/sessions/{code}/discounts", tags=["discounts"])
 async def list_discounts(
     code: str,
     session: Session = Depends(get_session_or_404),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """List all discounts for a session."""
     # Reload with discount relationships
@@ -35,7 +36,7 @@ async def list_discounts(
         .where(Session.id == session.id)
     )
     session = result.scalar_one()
-    
+
     return [
         DiscountResponse(
             id=d.id,
@@ -44,7 +45,7 @@ async def list_discounts(
             participant_name=d.participant.name if d.participant else None,
             name=d.name,
             discount_type=d.discount_type,
-            value=d.value
+            value=d.value,
         )
         for d in session.discounts
     ]
@@ -59,20 +60,22 @@ async def create_discount(
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new discount for a session. Requires host token."""
-    
+
     # Validate participant_id if provided
     participant = None
     if discount_data.participant_id:
         result = await db.execute(
             select(Participant).where(
                 Participant.id == discount_data.participant_id,
-                Participant.session_id == session.id
+                Participant.session_id == session.id,
             )
         )
         participant = result.scalar_one_or_none()
         if not participant:
-            raise HTTPException(status_code=404, detail="Participant not found in this session")
-    
+            raise HTTPException(
+                status_code=404, detail="Participant not found in this session"
+            )
+
     # Auto-generate name if not provided
     discount_name = discount_data.name
     if not discount_name or not discount_name.strip():
@@ -81,27 +84,27 @@ async def create_discount(
             value_str = f"{discount_data.value}%"
         else:
             value_str = f"${discount_data.value}"
-        
+
         if participant:
             discount_name = f"{value_str} off for {participant.name}"
         else:
             discount_name = f"{value_str} off"
-    
+
     discount = Discount(
         session_id=session.id,
         participant_id=discount_data.participant_id,
         name=discount_name,
         discount_type=discount_data.discount_type,
-        value=discount_data.value
+        value=discount_data.value,
     )
-    
+
     db.add(discount)
     await db.commit()
     await db.refresh(discount)
-    
+
     # Notify all connected clients
     background_tasks.add_task(manager.notify_session_update, code.upper())
-    
+
     return DiscountResponse(
         id=discount.id,
         session_id=discount.session_id,
@@ -109,7 +112,7 @@ async def create_discount(
         participant_name=participant.name if participant else None,
         name=discount.name,
         discount_type=discount.discount_type,
-        value=discount.value
+        value=discount.value,
     )
 
 
@@ -123,7 +126,7 @@ async def update_discount(
     db: AsyncSession = Depends(get_db),
 ):
     """Update a discount. Requires host token."""
-    
+
     # Find the discount
     result = await db.execute(
         select(Discount)
@@ -133,7 +136,7 @@ async def update_discount(
     discount = result.scalar_one_or_none()
     if not discount:
         raise HTTPException(status_code=404, detail="Discount not found")
-    
+
     # Update fields
     if discount_data.name is not None:
         discount.name = discount_data.name
@@ -147,19 +150,21 @@ async def update_discount(
             result = await db.execute(
                 select(Participant).where(
                     Participant.id == discount_data.participant_id,
-                    Participant.session_id == session.id
+                    Participant.session_id == session.id,
                 )
             )
             participant = result.scalar_one_or_none()
             if not participant:
-                raise HTTPException(status_code=404, detail="Participant not found in this session")
+                raise HTTPException(
+                    status_code=404, detail="Participant not found in this session"
+                )
             discount.participant_id = discount_data.participant_id
         else:
             discount.participant_id = None
-    
+
     await db.commit()
     await db.refresh(discount)
-    
+
     # Reload participant relationship
     result = await db.execute(
         select(Discount)
@@ -167,10 +172,10 @@ async def update_discount(
         .where(Discount.id == discount_id)
     )
     discount = result.scalar_one()
-    
+
     # Notify all connected clients
     background_tasks.add_task(manager.notify_session_update, code.upper())
-    
+
     return DiscountResponse(
         id=discount.id,
         session_id=discount.session_id,
@@ -178,7 +183,7 @@ async def update_discount(
         participant_name=discount.participant.name if discount.participant else None,
         name=discount.name,
         discount_type=discount.discount_type,
-        value=discount.value
+        value=discount.value,
     )
 
 
@@ -191,16 +196,18 @@ async def delete_discount(
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a discount. Requires host token."""
-    
+
     result = await db.execute(
-        select(Discount).where(Discount.id == discount_id, Discount.session_id == session.id)
+        select(Discount).where(
+            Discount.id == discount_id, Discount.session_id == session.id
+        )
     )
     discount = result.scalar_one_or_none()
     if not discount:
         raise HTTPException(status_code=404, detail="Discount not found")
-    
+
     await db.delete(discount)
     await db.commit()
-    
+
     # Notify all connected clients
     background_tasks.add_task(manager.notify_session_update, code.upper())

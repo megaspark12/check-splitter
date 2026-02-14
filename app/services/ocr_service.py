@@ -4,17 +4,19 @@ AI-powered Receipt Recognition Service using Google Gemini.
 Uses Gemini's vision capabilities to extract structured data from receipt images.
 Includes retry logic with exponential backoff for API resilience.
 """
+
 from __future__ import annotations
 
+import asyncio
 import io
 import json
-import asyncio
 import threading
 from datetime import date
-from typing import Any
 from decimal import Decimal
-from PIL import Image
+from typing import Any
+
 import tenacity
+from PIL import Image
 
 from app.config import get_settings
 from app.logging_config import get_logger
@@ -24,7 +26,7 @@ logger = get_logger("ocr_service")
 
 class DailyCallLimiter:
     """Thread-safe daily API call counter.
-    
+
     Tracks the number of calls made today and rejects once the limit is hit.
     Resets automatically at midnight (server time).
     """
@@ -72,13 +74,15 @@ def _get_daily_limiter() -> DailyCallLimiter:
     if _daily_limiter is None:
         settings = get_settings()
         _daily_limiter = DailyCallLimiter(settings.gemini_daily_limit)
-        logger.info(f"Gemini daily limit set to {settings.gemini_daily_limit} calls/day")
+        logger.info(
+            f"Gemini daily limit set to {settings.gemini_daily_limit} calls/day"
+        )
     return _daily_limiter
 
 
 class ReceiptItem:
     """Represents a parsed item from a receipt."""
-    
+
     def __init__(
         self,
         name: str,
@@ -97,11 +101,11 @@ class ReceiptItem:
 class GeminiReceiptParser:
     """
     Uses Google Gemini to parse receipts with vision AI.
-    
+
     This replaces traditional OCR + regex parsing with a single
     AI call that understands receipt structure directly.
     """
-    
+
     RECEIPT_PROMPT = """You are a human reading a restaurant receipt. Your job is to understand what was ordered, exactly the way a person sitting at that table would.
 
 Think step by step:
@@ -254,19 +258,22 @@ Return the full corrected JSON in the same format as before. Return ONLY valid J
         self.api_key = settings.gemini_api_key
         self.model_name = settings.gemini_model
         self._client = None
-    
+
     def _get_client(self):
         """Lazy initialization of Gemini client."""
         if self._client is None:
             import google.generativeai as genai
+
             genai.configure(api_key=self.api_key)
             self._client = genai.GenerativeModel(self.model_name)
         return self._client
-    
+
     @tenacity.retry(
         stop=tenacity.stop_after_attempt(3),
         wait=tenacity.wait_exponential(multiplier=1, min=1, max=10),
-        retry=tenacity.retry_if_exception_type((ConnectionError, TimeoutError, OSError)),
+        retry=tenacity.retry_if_exception_type(
+            (ConnectionError, TimeoutError, OSError)
+        ),
         before_sleep=lambda retry_state: logger.warning(
             f"Gemini API call failed (attempt {retry_state.attempt_number}), retrying..."
         ),
@@ -275,13 +282,13 @@ Return the full corrected JSON in the same format as before. Return ONLY valid J
     async def parse_receipt(self, image_bytes: bytes) -> dict[str, Any]:
         """
         Parse a receipt image and extract structured data.
-        
+
         Args:
             image_bytes: Raw image bytes (JPEG, PNG, or WebP)
-            
+
         Returns:
             Dict with items, currency, subtotal, tax, total
-            
+
         Retries up to 3 times with exponential backoff on transient errors.
         """
         # Check daily call limit
@@ -292,60 +299,57 @@ Return the full corrected JSON in the same format as before. Return ONLY valid J
             raise RuntimeError(
                 "Daily receipt scan limit reached. Please try again tomorrow."
             )
-        
+
         if not self.api_key:
             raise ValueError(
                 "GEMINI_API_KEY not configured. "
                 "Get a free API key at https://aistudio.google.com/apikey"
             )
-        
+
         # Prepare image for Gemini
         image = Image.open(io.BytesIO(image_bytes))
-        
+
         # Convert to RGB if necessary (Gemini doesn't like RGBA)
-        if image.mode == 'RGBA':
-            image = image.convert('RGB')
-        
+        if image.mode == "RGBA":
+            image = image.convert("RGB")
+
         # Get Gemini client
         model = self._get_client()
-        
+
         # Call Gemini with the image (run in thread to avoid blocking event loop)
         try:
             response = await asyncio.wait_for(
-                asyncio.to_thread(
-                    model.generate_content,
-                    [self.RECEIPT_PROMPT, image]
-                ),
+                asyncio.to_thread(model.generate_content, [self.RECEIPT_PROMPT, image]),
                 timeout=60,  # 60s timeout for Gemini API call
             )
         except asyncio.TimeoutError:
             logger.error("Gemini API call timed out after 60s")
             raise TimeoutError("Receipt processing timed out. Please try again.")
-        
+
         # Parse the JSON response
         try:
             # Extract JSON from response
             response_text = response.text.strip()
-            
+
             # Handle markdown code blocks
-            if response_text.startswith('```'):
+            if response_text.startswith("```"):
                 # Remove ```json and ``` markers
-                lines = response_text.split('\n')
+                lines = response_text.split("\n")
                 json_lines = []
                 in_json = False
                 for line in lines:
-                    if line.startswith('```'):
+                    if line.startswith("```"):
                         in_json = not in_json
                         continue
-                    if in_json or not line.startswith('```'):
+                    if in_json or not line.startswith("```"):
                         json_lines.append(line)
-                response_text = '\n'.join(json_lines)
-            
+                response_text = "\n".join(json_lines)
+
             result = json.loads(response_text)
-            
+
             # Validate and clean the result
             return self._validate_result(result)
-            
+
         except json.JSONDecodeError as e:
             # If JSON parsing fails, return empty result
             return {
@@ -355,13 +359,13 @@ Return the full corrected JSON in the same format as before. Return ONLY valid J
                 "tax": 0,
                 "total": 0,
                 "raw_response": response.text,
-                "error": f"Failed to parse AI response: {str(e)}"
+                "error": f"Failed to parse AI response: {str(e)}",
             }
-    
+
     def _validate_result(self, result: dict[str, Any]) -> dict[str, Any]:
         """Validate and clean the parsed result."""
         validated_items = []
-        
+
         for item in result.get("items", []):
             try:
                 # Ensure required fields
@@ -369,28 +373,30 @@ Return the full corrected JSON in the same format as before. Return ONLY valid J
                 price = float(item.get("price", 0))
                 quantity = int(item.get("quantity", 1))
                 is_refund = bool(item.get("is_refund", False))
-                
+
                 # Skip invalid items (refund items must also have positive price)
                 if not name or price <= 0:
                     continue
-                
+
                 # Ensure quantity is reasonable
                 if quantity < 1:
                     quantity = 1
                 elif quantity > 100:
                     quantity = 1  # Probably an error
-                
-                validated_items.append({
-                    "name": name,
-                    "price": Decimal(str(price)).quantize(Decimal('0.01')),
-                    "quantity": quantity,
-                    "is_tax": bool(item.get("is_tax", False)),
-                    "is_tip_suggestion": bool(item.get("is_tip_suggestion", False)),
-                    "is_refund": is_refund,
-                })
+
+                validated_items.append(
+                    {
+                        "name": name,
+                        "price": Decimal(str(price)).quantize(Decimal("0.01")),
+                        "quantity": quantity,
+                        "is_tax": bool(item.get("is_tax", False)),
+                        "is_tip_suggestion": bool(item.get("is_tip_suggestion", False)),
+                        "is_refund": is_refund,
+                    }
+                )
             except (ValueError, TypeError):
                 continue
-        
+
         # Validate discounts
         validated_discounts = []
         for discount in result.get("discounts", []):
@@ -398,33 +404,37 @@ Return the full corrected JSON in the same format as before. Return ONLY valid J
                 name = str(discount.get("name", "")).strip()
                 dtype = str(discount.get("type", "fixed")).strip().lower()
                 value = float(discount.get("value", 0))
-                
+
                 if not name or value <= 0:
                     continue
-                
+
                 # Normalize discount type
                 if dtype not in ("percentage", "fixed"):
                     dtype = "fixed"
-                
+
                 # Percentage must be <= 100
                 if dtype == "percentage" and value > 100:
                     continue
-                
-                validated_discounts.append({
-                    "name": name,
-                    "type": dtype,
-                    "value": Decimal(str(value)).quantize(Decimal('0.01')),
-                })
+
+                validated_discounts.append(
+                    {
+                        "name": name,
+                        "type": dtype,
+                        "value": Decimal(str(value)).quantize(Decimal("0.01")),
+                    }
+                )
             except (ValueError, TypeError):
                 continue
-        
+
         return {
             "items": validated_items,
             "discounts": validated_discounts,
             "currency": result.get("currency", "USD"),
-            "subtotal": Decimal(str(result.get("subtotal", 0))).quantize(Decimal('0.01')),
-            "tax": Decimal(str(result.get("tax", 0))).quantize(Decimal('0.01')),
-            "total": Decimal(str(result.get("total", 0))).quantize(Decimal('0.01')),
+            "subtotal": Decimal(str(result.get("subtotal", 0))).quantize(
+                Decimal("0.01")
+            ),
+            "tax": Decimal(str(result.get("tax", 0))).quantize(Decimal("0.01")),
+            "total": Decimal(str(result.get("total", 0))).quantize(Decimal("0.01")),
         }
 
     async def _retry_with_correction(
@@ -432,11 +442,11 @@ Return the full corrected JSON in the same format as before. Return ONLY valid J
     ) -> dict[str, Any]:
         """
         Make a second Gemini call to correct a mismatch between items and totals.
-        
+
         Args:
             image_bytes: Original image bytes
             original_result: The first parse result with items/discounts/totals
-            
+
         Returns:
             Corrected result dict, or original if retry fails
         """
@@ -454,7 +464,7 @@ Return the full corrected JSON in the same format as before. Return ONLY valid J
             items_lines.append(
                 f"  - {item['name']} × {item['quantity']} = {item['price']}{flag_str}"
             )
-        
+
         discounts_lines = []
         discounts_total = Decimal("0.00")
         for d in original_result.get("discounts", []):
@@ -463,69 +473,70 @@ Return the full corrected JSON in the same format as before. Return ONLY valid J
             else:
                 discounts_lines.append(f"  - {d['name']}: {d['value']}")
                 discounts_total += d["value"]
-        
+
         # Calculate items total (non-tax, non-tip, non-refund)
         items_total = sum(
             item["price"] * item["quantity"]
             for item in original_result["items"]
-            if not item["is_tax"] and not item["is_tip_suggestion"] and not item["is_refund"]
+            if not item["is_tax"]
+            and not item["is_tip_suggestion"]
+            and not item["is_refund"]
         )
-        
+
         difference = items_total - discounts_total - original_result["subtotal"]
-        
+
         correction_prompt = self.CORRECTION_PROMPT_TEMPLATE.format(
             items_total=items_total,
             items_list="\n".join(items_lines) if items_lines else "  (none)",
             discounts_total=discounts_total,
-            discounts_list="\n".join(discounts_lines) if discounts_lines else "  (none)",
+            discounts_list=(
+                "\n".join(discounts_lines) if discounts_lines else "  (none)"
+            ),
             receipt_subtotal=original_result["subtotal"],
             receipt_tax=original_result["tax"],
             receipt_total=original_result["total"],
             difference=difference,
         )
-        
+
         # Check daily limit for retry call
         limiter = _get_daily_limiter()
         if not limiter.acquire():
             logger.warning("Daily limit reached, skipping correction retry")
             return original_result
-        
+
         try:
             image = Image.open(io.BytesIO(image_bytes))
-            if image.mode == 'RGBA':
-                image = image.convert('RGB')
-            
+            if image.mode == "RGBA":
+                image = image.convert("RGB")
+
             model = self._get_client()
-            
+
             response = await asyncio.wait_for(
-                asyncio.to_thread(
-                    model.generate_content,
-                    [correction_prompt, image]
-                ),
+                asyncio.to_thread(model.generate_content, [correction_prompt, image]),
                 timeout=60,
             )
-            
+
             response_text = response.text.strip()
-            
+
             # Handle markdown code blocks
-            if response_text.startswith('```'):
-                lines = response_text.split('\n')
+            if response_text.startswith("```"):
+                lines = response_text.split("\n")
                 json_lines = []
                 in_json = False
                 for line in lines:
-                    if line.startswith('```'):
+                    if line.startswith("```"):
                         in_json = not in_json
                         continue
-                    if in_json or not line.startswith('```'):
+                    if in_json or not line.startswith("```"):
                         json_lines.append(line)
-                response_text = '\n'.join(json_lines)
-            
+                response_text = "\n".join(json_lines)
+
             corrected = json.loads(response_text)
             corrected_result = self._validate_result(corrected)
-            
+
             logger.info("Correction retry succeeded, using corrected result")
             return corrected_result
-            
+
         except Exception as e:
             logger.warning(f"Correction retry failed: {e}, using original result")
             return original_result
@@ -538,21 +549,21 @@ MISMATCH_THRESHOLD = Decimal("1.00")
 class OCRService:
     """
     Main service for processing receipt images.
-    
+
     Uses Google Gemini for AI-powered receipt recognition.
     Includes mismatch detection with automatic corrective retry.
     """
-    
+
     def __init__(self):
         self.parser = GeminiReceiptParser()
-    
+
     async def process_receipt(self, image_bytes: bytes) -> dict[str, Any]:
         """
         Process a receipt image and extract items.
-        
+
         Args:
             image_bytes: Raw image bytes
-            
+
         Returns:
             Dict containing:
                 - raw_text: Description of what was found
@@ -563,31 +574,32 @@ class OCRService:
                 - mismatch_retried: Whether a correction retry was attempted
         """
         result = await self.parser.parse_receipt(image_bytes)
-        
+
         warnings = []
         mismatch_retried = False
-        
+
         # Check for errors from parse_receipt (e.g., JSON decode failure)
         if result.get("error"):
             warnings.append(result["error"])
-        
+
         # Calculate items subtotal (non-tax, non-tip, non-refund)
         items_subtotal = sum(
             item["price"] * item["quantity"]
             for item in result["items"]
-            if not item["is_tax"] and not item["is_tip_suggestion"] and not item["is_refund"]
+            if not item["is_tax"]
+            and not item["is_tip_suggestion"]
+            and not item["is_refund"]
         )
-        
+
         # Calculate discount total (fixed discounts only for subtotal comparison)
         fixed_discounts_total = sum(
-            d["value"] for d in result.get("discounts", [])
-            if d["type"] == "fixed"
+            d["value"] for d in result.get("discounts", []) if d["type"] == "fixed"
         )
-        
+
         # Check for total mismatch — compare computed items subtotal against receipt's subtotal
         receipt_subtotal = result.get("subtotal", Decimal("0.00"))
         receipt_total = result.get("total", Decimal("0.00"))
-        
+
         if receipt_subtotal > Decimal("0"):
             difference = abs(items_subtotal - fixed_discounts_total - receipt_subtotal)
             if difference > MISMATCH_THRESHOLD:
@@ -596,23 +608,30 @@ class OCRService:
                     f"discounts={fixed_discounts_total}, receipt_subtotal={receipt_subtotal}, "
                     f"difference={difference}"
                 )
-                
+
                 # Attempt corrective retry
-                corrected = await self.parser._retry_with_correction(image_bytes, result)
+                corrected = await self.parser._retry_with_correction(
+                    image_bytes, result
+                )
                 mismatch_retried = True
-                
+
                 # Check if corrected result is better
                 corrected_subtotal = sum(
                     item["price"] * item["quantity"]
                     for item in corrected["items"]
-                    if not item["is_tax"] and not item["is_tip_suggestion"] and not item["is_refund"]
+                    if not item["is_tax"]
+                    and not item["is_tip_suggestion"]
+                    and not item["is_refund"]
                 )
                 corrected_fixed_discounts = sum(
-                    d["value"] for d in corrected.get("discounts", [])
+                    d["value"]
+                    for d in corrected.get("discounts", [])
                     if d["type"] == "fixed"
                 )
-                corrected_diff = abs(corrected_subtotal - corrected_fixed_discounts - receipt_subtotal)
-                
+                corrected_diff = abs(
+                    corrected_subtotal - corrected_fixed_discounts - receipt_subtotal
+                )
+
                 if corrected_diff < difference:
                     logger.info(
                         f"Corrected result is better: diff {corrected_diff} < {difference}"
@@ -620,7 +639,7 @@ class OCRService:
                     result = corrected
                     items_subtotal = corrected_subtotal
                     fixed_discounts_total = corrected_fixed_discounts
-                    
+
                     if corrected_diff > MISMATCH_THRESHOLD:
                         warnings.append(
                             f"Items may not match receipt total. "
@@ -633,35 +652,37 @@ class OCRService:
                         f"Extracted items: {items_subtotal}, Receipt subtotal: {receipt_subtotal}. "
                         f"Please review items manually."
                     )
-        
+
         # Convert to format expected by the rest of the app
         items = []
         for item in result["items"]:
-            items.append({
-                "name": item["name"],
-                "price": str(item["price"]),
-                "quantity": item["quantity"],
-                "is_tax": item["is_tax"],
-                "is_tip_suggestion": item["is_tip_suggestion"],
-                "is_refund": item.get("is_refund", False),
-            })
-        
+            items.append(
+                {
+                    "name": item["name"],
+                    "price": str(item["price"]),
+                    "quantity": item["quantity"],
+                    "is_tax": item["is_tax"],
+                    "is_tip_suggestion": item["is_tip_suggestion"],
+                    "is_refund": item.get("is_refund", False),
+                }
+            )
+
         # Convert discounts
         discounts = []
         for d in result.get("discounts", []):
-            discounts.append({
-                "name": d["name"],
-                "type": d["type"],
-                "value": str(d["value"]),
-            })
-        
+            discounts.append(
+                {
+                    "name": d["name"],
+                    "type": d["type"],
+                    "value": str(d["value"]),
+                }
+            )
+
         # Recalculate summary with final values
         tax_total = sum(
-            Decimal(i["price"]) * i["quantity"]
-            for i in items
-            if i["is_tax"]
+            Decimal(i["price"]) * i["quantity"] for i in items if i["is_tax"]
         )
-        
+
         return {
             "raw_text": f"Gemini AI parsed {len(items)} items from receipt",
             "items": items,

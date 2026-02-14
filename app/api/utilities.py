@@ -3,6 +3,7 @@ Utility API routes.
 
 Handles utility functions like currency inference.
 """
+
 from fastapi import APIRouter, Request
 
 router = APIRouter(prefix="/api", tags=["utilities"])
@@ -13,12 +14,10 @@ COUNTRY_CURRENCIES = {
     "IL": {"code": "ILS", "symbol": "₪", "name": "Israeli Shekel"},
     "AE": {"code": "AED", "symbol": "د.إ", "name": "UAE Dirham"},
     "SA": {"code": "SAR", "symbol": "ر.س", "name": "Saudi Riyal"},
-    
     # North America
     "US": {"code": "USD", "symbol": "$", "name": "US Dollar"},
     "CA": {"code": "CAD", "symbol": "C$", "name": "Canadian Dollar"},
     "MX": {"code": "MXN", "symbol": "$", "name": "Mexican Peso"},
-    
     # Europe
     "GB": {"code": "GBP", "symbol": "£", "name": "British Pound"},
     "DE": {"code": "EUR", "symbol": "€", "name": "Euro"},
@@ -38,7 +37,6 @@ COUNTRY_CURRENCIES = {
     "CZ": {"code": "CZK", "symbol": "Kč", "name": "Czech Koruna"},
     "HU": {"code": "HUF", "symbol": "Ft", "name": "Hungarian Forint"},
     "RU": {"code": "RUB", "symbol": "₽", "name": "Russian Ruble"},
-    
     # Asia Pacific
     "JP": {"code": "JPY", "symbol": "¥", "name": "Japanese Yen"},
     "CN": {"code": "CNY", "symbol": "¥", "name": "Chinese Yuan"},
@@ -54,13 +52,11 @@ COUNTRY_CURRENCIES = {
     "PH": {"code": "PHP", "symbol": "₱", "name": "Philippine Peso"},
     "ID": {"code": "IDR", "symbol": "Rp", "name": "Indonesian Rupiah"},
     "VN": {"code": "VND", "symbol": "₫", "name": "Vietnamese Dong"},
-    
     # South America
     "BR": {"code": "BRL", "symbol": "R$", "name": "Brazilian Real"},
     "AR": {"code": "ARS", "symbol": "$", "name": "Argentine Peso"},
     "CL": {"code": "CLP", "symbol": "$", "name": "Chilean Peso"},
     "CO": {"code": "COP", "symbol": "$", "name": "Colombian Peso"},
-    
     # Africa
     "ZA": {"code": "ZAR", "symbol": "R", "name": "South African Rand"},
     "EG": {"code": "EGP", "symbol": "E£", "name": "Egyptian Pound"},
@@ -80,7 +76,7 @@ async def get_currency(
 ):
     """
     Infer the user's currency based on location.
-    
+
     Priority:
     1. Explicit country_code parameter
     2. Timezone-based inference
@@ -92,20 +88,20 @@ async def get_currency(
         country_code = country_code.upper()
         if country_code in COUNTRY_CURRENCIES:
             return COUNTRY_CURRENCIES[country_code]
-    
+
     # 2. Try timezone-based inference
     if timezone:
         tz_country = infer_country_from_timezone(timezone)
         if tz_country and tz_country in COUNTRY_CURRENCIES:
             return COUNTRY_CURRENCIES[tz_country]
-    
+
     # 3. Try Accept-Language header
     accept_language = request.headers.get("Accept-Language", "")
     if accept_language:
         country = infer_country_from_language(accept_language)
         if country and country in COUNTRY_CURRENCIES:
             return COUNTRY_CURRENCIES[country]
-    
+
     # 4. Default
     return DEFAULT_CURRENCY
 
@@ -159,7 +155,7 @@ def infer_country_from_timezone(timezone: str) -> str:
         "Africa/Johannesburg": "ZA",
         "Africa/Cairo": "EG",
     }
-    
+
     return tz_mapping.get(timezone, "")
 
 
@@ -170,13 +166,13 @@ def infer_country_from_language(accept_language: str) -> str:
     parts = accept_language.split(",")
     if parts:
         first_lang = parts[0].strip().split(";")[0]
-        
+
         # Check for region code (e.g., en-US, he-IL)
         if "-" in first_lang:
             region = first_lang.split("-")[1].upper()
             if region in COUNTRY_CURRENCIES:
                 return region
-        
+
         # Map language to likely country
         lang_mapping = {
             "he": "IL",
@@ -200,8 +196,8 @@ def infer_country_from_language(accept_language: str) -> str:
             "th": "TH",
             "vi": "VN",
         }
-        
+
         lang_code = first_lang.split("-")[0].lower()
         return lang_mapping.get(lang_code, "")
-    
+
     return ""

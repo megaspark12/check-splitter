@@ -1,28 +1,30 @@
 """Application configuration."""
+
 from __future__ import annotations
 
 import sys
-from pydantic_settings import BaseSettings
 from functools import lru_cache
+
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
-    
+
     app_name: str = "Check Splitter"
     version: str = "1.0.0"
     debug: bool = False  # Default to False for production safety
     secret_key: str = "dev-secret-key-change-in-production"
     environment: str = "development"  # development, staging, production
-    
+
     # Server
     host: str = "0.0.0.0"
     port: int = 8000
     workers: int = 2
-    
+
     # CORS - comma-separated list of allowed origins
     cors_origins: str = "*"
-    
+
     # Database
     database_url: str = "sqlite+aiosqlite:///./check_splitter.db"
     db_user: str = ""
@@ -33,65 +35,65 @@ class Settings(BaseSettings):
     db_max_overflow: int = 10
     db_pool_timeout: int = 30
     db_echo: bool = False  # Log SQL queries
-    
+
     # AI Vision (Gemini)
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.0-flash"  # Latest vision model
     gemini_daily_limit: int = 100  # Max Gemini API calls per day (0 = unlimited)
-    
+
     # Session
     session_expiry_minutes: int = 15
     session_code_length: int = 6
-    
+
     # File uploads / Storage
     max_upload_size_mb: int = 10
     uploads_dir: str = "uploads"
     storage_backend: str = "local"  # "local" or "gcs"
     gcs_bucket_name: str = ""  # GCS bucket for receipt images
-    
+
     # Rate limiting
     rate_limit_per_minute: int = 180
-    
+
     # Logging
     log_level: str = "INFO"
     log_format: str = "json"  # json or text
-    
+
     # Migrations
     run_migrations: bool = False  # Run alembic upgrade head on startup
-    
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
-    
+
     @property
     def is_production(self) -> bool:
         """Check if running in production environment."""
         return self.environment.lower() == "production"
-    
+
     @property
     def is_development(self) -> bool:
         """Check if running in development environment."""
         return self.environment.lower() == "development"
-    
+
     @property
     def cors_origins_list(self) -> list[str]:
         """Parse CORS origins from comma-separated string."""
         if self.cors_origins == "*":
             return ["*"]
         return [origin.strip() for origin in self.cors_origins.split(",")]
-    
+
     @property
     def max_upload_size_bytes(self) -> int:
         """Get max upload size in bytes."""
         return self.max_upload_size_mb * 1024 * 1024
-    
+
     @property
     def effective_database_url(self) -> str:
         """Build the database URL, supporting Cloud SQL Unix sockets."""
         # If a full DATABASE_URL is provided, use it directly
         if self.database_url != "sqlite+aiosqlite:///./check_splitter.db":
             return self.database_url
-        
+
         # Auto-construct from Cloud SQL components if available
         if self.instance_connection_name and self.db_user and self.db_pass:
             socket_path = f"/cloudsql/{self.instance_connection_name}"
@@ -99,33 +101,39 @@ class Settings(BaseSettings):
                 f"postgresql+asyncpg://{self.db_user}:{self.db_pass}"
                 f"@/{self.db_name}?host={socket_path}"
             )
-        
+
         # Fall back to default
         return self.database_url
-    
+
     def validate_production_config(self) -> None:
         """Validate that production-required settings are configured."""
         if self.is_production:
             errors = []
-            
+
             if self.secret_key == "dev-secret-key-change-in-production":
                 errors.append("SECRET_KEY must be set in production")
-            
+
             if self.debug:
                 errors.append("DEBUG must be False in production")
-            
+
             if self.cors_origins == "*":
                 # Warning only — allow initial deployment, lock down later
-                print("WARNING: CORS_ORIGINS is '*' in production. Restrict to your domain.", file=sys.stderr)
-            
+                print(
+                    "WARNING: CORS_ORIGINS is '*' in production. Restrict to your domain.",
+                    file=sys.stderr,
+                )
+
             if "sqlite" in self.effective_database_url.lower():
                 # Warning only, not an error
-                print("WARNING: Using SQLite in production is not recommended", file=sys.stderr)
-            
+                print(
+                    "WARNING: Using SQLite in production is not recommended",
+                    file=sys.stderr,
+                )
+
             if errors:
                 raise ValueError(
-                    "Production configuration errors:\n" + 
-                    "\n".join(f"  - {e}" for e in errors)
+                    "Production configuration errors:\n"
+                    + "\n".join(f"  - {e}" for e in errors)
                 )
 
 

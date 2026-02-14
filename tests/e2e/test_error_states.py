@@ -1,5 +1,7 @@
 """E2E tests for error states and edge cases."""
+
 import re
+
 import requests
 from playwright.sync_api import Page, expect
 
@@ -41,26 +43,36 @@ class TestEmptyForms:
 
 class TestRefreshButton:
 
-    def test_refresh_items(self, page: Page, base_url, create_session_via_api, add_items_via_api, api_url):
+    def test_refresh_items(
+        self, page: Page, base_url, create_session_via_api, add_items_via_api, api_url
+    ):
         session = create_session_via_api("Alice")
         code = session["code"]
         host_token = session["host_token"]
-        add_items_via_api(code, [{"name": "Burger", "price": 12.99}], host_token=host_token)
+        add_items_via_api(
+            code, [{"name": "Burger", "price": 12.99}], host_token=host_token
+        )
         page.goto(base_url)
         page.locator("#session-code").fill(code)
         page.locator("#join-name").fill("Bob")
         page.locator("#join-session-form button[type=submit]").click()
-        expect(page.locator("#participant-page")).to_have_class(re.compile("active"), timeout=5000)
-        expect(page.locator("#participant-items-list .item-row")).to_have_count(1, timeout=5000)
+        expect(page.locator("#participant-page")).to_have_class(
+            re.compile("active"), timeout=5000
+        )
+        expect(page.locator("#participant-items-list .item-row")).to_have_count(
+            1, timeout=5000
+        )
         # Add another item via API (requires host token)
         requests.post(
             f"{api_url}/sessions/{code}/items",
             json={"name": "Pizza", "price": 15.50},
-            headers={"X-Host-Token": host_token}
+            headers={"X-Host-Token": host_token},
         )
         page.locator("#refresh-btn").click()
         page.wait_for_timeout(2000)
-        expect(page.locator("#participant-items-list .item-row")).to_have_count(2, timeout=5000)
+        expect(page.locator("#participant-items-list .item-row")).to_have_count(
+            2, timeout=5000
+        )
 
 
 class TestJoinViaURL:
@@ -79,7 +91,9 @@ class TestCopyCode:
         page.goto(base_url)
         page.locator("#host-name").fill("Alice")
         page.locator("#create-session-form button[type=submit]").click()
-        expect(page.locator("#session-page")).to_have_class(re.compile("active"), timeout=5000)
+        expect(page.locator("#session-page")).to_have_class(
+            re.compile("active"), timeout=5000
+        )
         page.locator("#copy-code-btn").click()
         page.wait_for_timeout(500)
         text = page.locator("#copy-btn-text").text_content()
