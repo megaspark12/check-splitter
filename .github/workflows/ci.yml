@@ -1,8 +1,12 @@
 # ============================================
 # Check Splitter — CI/CD Pipeline
 # ============================================
-# CI: lint + test on every push/PR
+# CI: lint + test + e2e on every push/PR
 # CD: build Docker image + deploy to Cloud Run on push to main
+#
+# Deployment path:
+#   GitHub Actions is the CANONICAL deploy path.
+#   Cloud Build (cloudbuild.yaml) is a manual fallback only.
 
 name: CI/CD
 
@@ -26,6 +30,7 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -45,14 +50,16 @@ jobs:
         run: isort --check --diff app/ tests/
 
       - name: Type check (mypy)
+        # TODO: Remove || true once all type errors are fixed
         run: mypy app/ --ignore-missing-imports --no-error-summary || true
 
   # ==========================================
-  # Test: unit + integration
+  # Test: unit + integration with coverage
   # ==========================================
   test:
     name: Test
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -65,16 +72,11 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
 
-      - name: Run unit tests
-        run: pytest tests/unit/ -v --tb=short
-
-      - name: Run integration tests
-        run: pytest tests/integration/ -v --tb=short
-
       - name: Run tests with coverage
         run: |
           pytest tests/unit/ tests/integration/ \
             --cov=app --cov-report=term-missing --cov-report=xml \
+            --cov-fail-under=70 \
             -v --tb=short
 
       - name: Upload coverage report
@@ -85,11 +87,50 @@ jobs:
           path: coverage.xml
 
   # ==========================================
+  # E2E: Playwright tests against live server
+  # ==========================================
+  e2e:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [test]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Install Playwright browsers
+        run: playwright install chromium --with-deps
+
+      - name: Run E2E tests
+        run: pytest tests/e2e/ -v --tb=short
+        env:
+          RATE_LIMIT_PER_MINUTE: "9999"
+
+      - name: Upload Playwright traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: |
+            test_server.log
+            test_server_err.log
+          retention-days: 7
+
+  # ==========================================
   # Docker: build image to verify it works
   # ==========================================
   docker:
     name: Docker Build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: [test]
     steps:
       - uses: actions/checkout@v4
@@ -112,7 +153,8 @@ jobs:
   deploy:
     name: Deploy to Cloud Run
     runs-on: ubuntu-latest
-    needs: [lint, test, docker]
+    timeout-minutes: 15
+    needs: [lint, test, e2e, docker]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     permissions:
       contents: read
@@ -133,13 +175,22 @@ jobs:
       - name: Configure Docker for Artifact Registry
         run: gcloud auth configure-docker ${{ vars.GCP_REGION }}-docker.pkg.dev --quiet
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Build and push Docker image
-        run: |
-          IMAGE="${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/check-splitter/app"
-          docker build -t "${IMAGE}:${{ github.sha }}" -t "${IMAGE}:latest" .
-          docker push "${IMAGE}" --all-tags
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/check-splitter/app:${{ github.sha }}
+            ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/check-splitter/app:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Deploy to Cloud Run
+        id: deploy
         uses: google-github-actions/deploy-cloudrun@v2
         with:
           service: check-splitter
@@ -147,8 +198,41 @@ jobs:
           region: ${{ vars.GCP_REGION }}
 
       - name: Verify deployment
+        id: healthcheck
         run: |
           URL=$(gcloud run services describe check-splitter \
             --region=${{ vars.GCP_REGION }} \
             --format='value(status.url)')
-          curl -sf "${URL}/health" | python3 -m json.tool
+          echo "service_url=${URL}" >> $GITHUB_OUTPUT
+
+          # Retry health check up to 5 times with backoff
+          for i in 1 2 3 4 5; do
+            if curl -sf "${URL}/health" | python3 -m json.tool; then
+              echo "Health check passed on attempt $i"
+              exit 0
+            fi
+            echo "Health check attempt $i failed, waiting ${i}0s..."
+            sleep $((i * 10))
+          done
+          echo "Health check failed after 5 attempts"
+          exit 1
+
+      - name: Rollback on failure
+        if: failure() && steps.deploy.outcome == 'success'
+        run: |
+          echo "Deployment health check failed — rolling back traffic to previous revision..."
+          PREV_REV=$(gcloud run revisions list \
+            --service=check-splitter \
+            --region=${{ vars.GCP_REGION }} \
+            --sort-by='~metadata.creationTimestamp' \
+            --format='value(metadata.name)' \
+            --limit=2 | tail -1)
+
+          if [ -n "$PREV_REV" ]; then
+            gcloud run services update-traffic check-splitter \
+              --region=${{ vars.GCP_REGION }} \
+              --to-revisions="${PREV_REV}=100"
+            echo "Traffic rolled back to revision: ${PREV_REV}"
+          else
+            echo "WARNING: No previous revision found for rollback"
+          fi

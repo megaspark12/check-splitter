@@ -21,9 +21,16 @@ terraform {
     }
   }
 
-  # Remote backend (uncomment after first apply)
+  # ====== Remote Backend (GCS) ======
+  # To enable remote state storage:
+  #   1. Run: terraform apply -var='create_tfstate_bucket=true'
+  #   2. Run: make tf-enable-remote-state
+  #      (or manually: terraform output tfstate_bucket, then uncomment below
+  #       with the bucket name, then terraform init -migrate-state)
+  #   3. Commit the uncommented backend block.
+  #
   # backend "gcs" {
-  #   bucket = "check-splitter-tfstate"
+  #   bucket = "<YOUR_TFSTATE_BUCKET_NAME>"
   #   prefix = "terraform/state"
   # }
 }

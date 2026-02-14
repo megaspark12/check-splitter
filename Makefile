@@ -3,7 +3,7 @@
 # ============================================
 # Convenience targets for development and deployment
 
-.PHONY: help dev test lint migrate build deploy tf-init tf-plan tf-apply tf-destroy clean
+.PHONY: help dev test lint format migrate build run-docker dev-docker deploy deploy-cloudbuild deploy-manual tf-init tf-plan tf-apply tf-destroy tf-output tf-enable-remote-state clean setup
 
 SHELL := /bin/bash
 PROJECT_DIR := $(shell pwd)
@@ -28,9 +28,15 @@ test-unit: ## Run unit tests only
 test-integration: ## Run integration tests only
 	pytest tests/integration/ -v
 
-lint: ## Run linting checks
-	python -m py_compile app/main.py
-	@echo "Syntax OK"
+lint: ## Run linting checks (matches CI)
+	black --check --diff app/ tests/
+	isort --check --diff app/ tests/
+	@echo "Lint OK"
+
+format: ## Auto-format code with black + isort
+	black app/ tests/
+	isort app/ tests/
+	@echo "Formatted."
 
 # ====== Database ======
 
@@ -48,12 +54,15 @@ migrate-rollback: ## Rollback last migration
 build: ## Build Docker image locally
 	docker build -t check-splitter:local .
 
-run-docker: ## Run Docker container locally
+run-docker: ## Run Docker container locally (production-like)
 	docker run --rm -p 8000:8000 \
 		--env-file .env \
 		-e ENVIRONMENT=development \
 		-e RUN_MIGRATIONS=true \
 		check-splitter:local
+
+dev-docker: ## Run with Docker Compose + live source mount (dev mode)
+	docker compose up --build
 
 # ====== Terraform ======
 
@@ -72,12 +81,34 @@ tf-destroy: ## Destroy all infrastructure (DANGER)
 tf-output: ## Show Terraform outputs
 	cd $(TERRAFORM_DIR) && terraform output
 
-# ====== Cloud Build ======
+tf-enable-remote-state: ## Migrate Terraform state to GCS remote backend
+	@BUCKET=$$(cd $(TERRAFORM_DIR) && terraform output -raw tfstate_bucket 2>/dev/null); \
+	if [ -z "$$BUCKET" ] || [ "$$BUCKET" = "N/A (not created)" ]; then \
+		echo "Error: No tfstate bucket found. Run 'make tf-apply' with create_tfstate_bucket=true first."; \
+		exit 1; \
+	fi; \
+	echo "Migrating state to GCS bucket: $$BUCKET"; \
+	cd $(TERRAFORM_DIR) && \
+	sed -i.bak 's|# backend "gcs"|backend "gcs"|; s|#   bucket = "<YOUR_TFSTATE_BUCKET_NAME>"|  bucket = "'$$BUCKET'"|; s|#   prefix = "terraform/state"|  prefix = "terraform/state"|; s|# }|}|' main.tf && \
+	rm -f main.tf.bak && \
+	terraform init -migrate-state && \
+	echo "State migrated to GCS bucket: $$BUCKET"
 
-deploy: ## Deploy to Cloud Run via Cloud Build
+# ====== Deployment ======
+
+deploy: ## Show canonical deploy instructions
+	@echo "╔══════════════════════════════════════════════════════════════╗"
+	@echo "║  Canonical deploys happen via GitHub Actions CI/CD:        ║"
+	@echo "║    git push origin main                                    ║"
+	@echo "║                                                            ║"
+	@echo "║  For manual fallback via Cloud Build:                      ║"
+	@echo "║    make deploy-cloudbuild                                  ║"
+	@echo "╚══════════════════════════════════════════════════════════════╝"
+
+deploy-cloudbuild: ## Deploy to Cloud Run via Cloud Build (manual fallback)
 	gcloud builds submit --config=cloudbuild.yaml .
 
-deploy-manual: ## Manual deploy: build + push + deploy
+deploy-manual: ## Manual deploy: build + push + deploy (emergency use)
 	$(eval REGION := $(shell cd $(TERRAFORM_DIR) && terraform output -raw cloud_run_url 2>/dev/null | grep -oP '[\w-]+(?=\.run\.app)' || echo "europe-west1"))
 	$(eval PROJECT := $(shell gcloud config get-value project))
 	$(eval IMAGE := $(REGION)-docker.pkg.dev/$(PROJECT)/check-splitter/app:manual)

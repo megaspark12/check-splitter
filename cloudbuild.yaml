@@ -1,7 +1,11 @@
 # ============================================
-# Cloud Build CI/CD Pipeline
+# Cloud Build — Manual Fallback Deploy
 # ============================================
-# Triggered on push to main branch (or manually)
+# NOTE: Canonical deployments happen via GitHub Actions CI/CD pipeline
+#       (push to main → lint → test → e2e → build → deploy).
+#
+# This file is a MANUAL FALLBACK for when you need to deploy outside
+# of the normal Git workflow:  make deploy-cloudbuild
 #
 # Steps:
 #   1. Build Docker image

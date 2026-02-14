@@ -1,0 +1,37 @@
+# ============================================
+# Dependabot — Automated Dependency Updates
+# ============================================
+
+version: 2
+updates:
+  # Python dependencies (pip)
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "python"
+    commit-message:
+      prefix: "deps"
+    # Group minor/patch updates to reduce PR noise
+    groups:
+      python-minor:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # GitHub Actions versions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "ci"

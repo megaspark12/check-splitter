@@ -66,3 +66,8 @@ CHAT_CONTEXT.md
 terraform/plan.out
 terraform/plan2.out
 terraform/*.tfstate*
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+
+# Docker
+docker-compose.override.yml
