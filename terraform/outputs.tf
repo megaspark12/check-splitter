@@ -36,3 +36,15 @@ output "tfstate_bucket" {
   description = "Terraform state bucket name (if created)"
   value       = var.create_tfstate_bucket ? google_storage_bucket.tfstate[0].name : "N/A (not created)"
 }
+
+# ====== GitHub Actions WIF ======
+
+output "wif_provider" {
+  description = "Workload Identity Federation provider resource name (set as WIF_PROVIDER secret in GitHub)"
+  value       = var.github_repo != "" ? google_iam_workload_identity_pool_provider.github[0].name : "N/A (github_repo not set)"
+}
+
+output "wif_service_account" {
+  description = "GitHub Actions deployer service account email (set as WIF_SERVICE_ACCOUNT secret in GitHub)"
+  value       = var.github_repo != "" ? google_service_account.github_deployer[0].email : "N/A (github_repo not set)"
+}

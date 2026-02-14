@@ -39,3 +39,6 @@ gemini_api_key = "your-gemini-api-key"
 # Safety flags
 # deletion_protection   = true
 # create_tfstate_bucket = false   # Set true on first apply for remote state
+
+# GitHub Actions CI/CD (enables Workload Identity Federation)
+# github_repo = "your-org/your-repo"

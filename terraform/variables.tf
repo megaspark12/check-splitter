@@ -122,3 +122,11 @@ variable "create_tfstate_bucket" {
   type        = bool
   default     = false
 }
+
+# ====== GitHub Actions CI/CD ======
+
+variable "github_repo" {
+  description = "GitHub repo in 'owner/repo' format for Workload Identity Federation (leave empty to skip WIF setup)"
+  type        = string
+  default     = ""
+}
