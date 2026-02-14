@@ -3,11 +3,10 @@ Storage backend abstraction for receipt image uploads.
 
 Supports local filesystem (development) and Google Cloud Storage (production).
 """
-import os
-import uuid
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Optional
 
 from app.config import get_settings
 from app.logging_config import get_logger
@@ -43,7 +42,7 @@ class StorageBackend(ABC):
         ...
     
     @abstractmethod
-    async def get_url(self, path: str) -> Optional[str]:
+    async def get_url(self, path: str) -> str | None:
         """
         Get a URL to access the file (signed URL for GCS, local path otherwise).
         
@@ -86,7 +85,7 @@ class LocalStorage(StorageBackend):
             logger.error(f"Failed to delete local file {path}: {e}")
             return False
     
-    async def get_url(self, path: str) -> Optional[str]:
+    async def get_url(self, path: str) -> str | None:
         """Return local file path (no URL needed for dev)."""
         if Path(path).exists():
             return path
@@ -160,7 +159,7 @@ class GCSStorage(StorageBackend):
             logger.error(f"Failed to delete from GCS {path}: {e}")
             return False
     
-    async def get_url(self, path: str) -> Optional[str]:
+    async def get_url(self, path: str) -> str | None:
         """Generate a signed URL for temporary access."""
         import asyncio
         from datetime import timedelta

@@ -1,7 +1,8 @@
 """Participant schemas."""
+from __future__ import annotations
+
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
 from pydantic import BaseModel, Field
 
 
@@ -12,9 +13,9 @@ class ParticipantCreate(BaseModel):
 
 class ParticipantUpdate(BaseModel):
     """Schema for updating a participant."""
-    name: Optional[str] = Field(None, min_length=1, max_length=100)
-    tip_percentage: Optional[Decimal] = Field(None, ge=0, le=100, decimal_places=2)
-    tip_amount: Optional[Decimal] = Field(None, ge=0, decimal_places=2)
+    name: str | None = Field(None, min_length=1, max_length=100)
+    tip_percentage: Decimal | None = Field(None, ge=0, le=100, decimal_places=2)
+    tip_amount: Decimal | None = Field(None, ge=0, decimal_places=2)
 
 
 class ParticipantResponse(BaseModel):
@@ -23,8 +24,8 @@ class ParticipantResponse(BaseModel):
     session_id: str
     name: str
     is_host: bool
-    tip_percentage: Optional[Decimal] = None
-    tip_amount: Optional[Decimal] = None
+    tip_percentage: Decimal | None = None
+    tip_amount: Decimal | None = None
     joined_at: datetime
     
     class Config:

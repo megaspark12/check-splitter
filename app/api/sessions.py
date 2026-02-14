@@ -3,14 +3,14 @@ Sessions API routes.
 
 Handles session creation, retrieval, QR codes, summaries, and WebSocket connections.
 """
-import os
+from __future__ import annotations
+
 import uuid
 import hashlib
-import aiofiles
 from pathlib import Path
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Optional
+from dataclasses import dataclass
 from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile, File, Request, WebSocket, WebSocketDisconnect, Query
 from sqlalchemy import select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,6 +32,41 @@ from app.websocket_manager import manager
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 logger = get_logger("api.sessions")
+
+
+# Adapter dataclasses for BillCalculator (prefixed with _ to avoid pytest collection)
+@dataclass
+class _Item:
+    id: str
+    name: str
+    price: Decimal
+    quantity: int
+    is_tax: bool
+    is_tip_suggestion: bool
+
+
+@dataclass
+class _Participant:
+    id: str
+    name: str
+    tip_percentage: Decimal | None
+    tip_amount: Decimal | None
+
+
+@dataclass
+class _Assignment:
+    item_id: str
+    participant_id: str
+    share_count: int
+
+
+@dataclass
+class _Discount:
+    id: str
+    name: str
+    discount_type: str
+    value: Decimal
+    participant_id: str | None
 
 
 @router.websocket("/ws/{code}")
@@ -88,8 +123,8 @@ def get_client_network_hash(request: Request) -> str:
 @router.get("/nearby", response_model=NearbySessionsResponse)
 async def get_nearby_sessions(
     request: Request,
-    lat: Optional[float] = Query(None, ge=-90, le=90, description="GPS latitude"),
-    lng: Optional[float] = Query(None, ge=-180, le=180, description="GPS longitude"),
+    lat: float | None = Query(None, ge=-90, le=90, description="GPS latitude"),
+    lng: float | None = Query(None, ge=-180, le=180, description="GPS longitude"),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -426,47 +461,50 @@ async def get_session_summary(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     
-    # Build data structures for calculator
-    items = []
-    for item in session.items:
-        items.append(type('Item', (), {
-            'id': item.id,
-            'name': item.name,
-            'price': item.price,
-            'quantity': item.quantity,
-            'is_tax': item.is_tax,
-            'is_tip_suggestion': item.is_tip_suggestion,
-        })())
+    items = [
+        _Item(
+            id=item.id,
+            name=item.name,
+            price=item.price,
+            quantity=item.quantity,
+            is_tax=item.is_tax,
+            is_tip_suggestion=item.is_tip_suggestion,
+        )
+        for item in session.items
+    ]
     
-    participants = []
-    for p in session.participants:
-        participants.append(type('Participant', (), {
-            'id': p.id,
-            'name': p.name,
-            'tip_percentage': p.tip_percentage,
-            'tip_amount': p.tip_amount,
-        })())
+    participants = [
+        _Participant(
+            id=p.id,
+            name=p.name,
+            tip_percentage=p.tip_percentage,
+            tip_amount=p.tip_amount,
+        )
+        for p in session.participants
+    ]
     
     # Flatten all assignments
-    assignments = []
-    for item in session.items:
-        for assignment in item.assignments:
-            assignments.append(type('Assignment', (), {
-                'item_id': assignment.item_id,
-                'participant_id': assignment.participant_id,
-                'share_count': assignment.share_count,
-            })())
+    assignments = [
+        _Assignment(
+            item_id=assignment.item_id,
+            participant_id=assignment.participant_id,
+            share_count=assignment.share_count,
+        )
+        for item in session.items
+        for assignment in item.assignments
+    ]
     
     # Build discounts list
-    discounts = []
-    for d in session.discounts:
-        discounts.append(type('Discount', (), {
-            'id': d.id,
-            'name': d.name,
-            'discount_type': d.discount_type.value,  # Convert enum to string
-            'value': d.value,
-            'participant_id': d.participant_id,
-        })())
+    discounts = [
+        _Discount(
+            id=d.id,
+            name=d.name,
+            discount_type=d.discount_type.value,  # Convert enum to string
+            value=d.value,
+            participant_id=d.participant_id,
+        )
+        for d in session.discounts
+    ]
     
     # Calculate split
     calculator = BillCalculator()

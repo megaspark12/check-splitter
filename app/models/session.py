@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime, timezone
 from enum import Enum as PyEnum
-from sqlalchemy import Column, String, DateTime, Text, Enum, Index
+from sqlalchemy import Column, String, DateTime, Text, Enum
 from sqlalchemy.dialects.sqlite import CHAR
 from sqlalchemy.orm import relationship
 from app.database import Base

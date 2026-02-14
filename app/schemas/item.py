@@ -1,6 +1,7 @@
 """Item schemas."""
+from __future__ import annotations
+
 from decimal import Decimal
-from typing import Optional
 from pydantic import BaseModel, Field
 
 
@@ -15,11 +16,11 @@ class ItemCreate(BaseModel):
 
 class ItemUpdate(BaseModel):
     """Schema for updating an item."""
-    name: Optional[str] = Field(None, min_length=1, max_length=200)
-    price: Optional[Decimal] = Field(None, ge=0, decimal_places=2)
-    quantity: Optional[int] = Field(None, ge=1)
-    is_tax: Optional[bool] = None
-    is_tip_suggestion: Optional[bool] = None
+    name: str | None = Field(None, min_length=1, max_length=200)
+    price: Decimal | None = Field(None, ge=0, decimal_places=2)
+    quantity: int | None = Field(None, ge=1)
+    is_tax: bool | None = None
+    is_tip_suggestion: bool | None = None
 
 
 class ItemResponse(BaseModel):

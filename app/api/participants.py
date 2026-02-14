@@ -3,7 +3,8 @@ Participants API routes.
 
 Handles participant management for sessions.
 """
-from typing import List
+from __future__ import annotations
+
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,7 +19,7 @@ from app.api.dependencies import get_session_or_404, require_host_token
 router = APIRouter(prefix="/api/sessions/{code}/participants", tags=["participants"])
 
 
-@router.get("", response_model=List[ParticipantResponse])
+@router.get("", response_model=list[ParticipantResponse])
 async def list_participants(
     code: str,
     session: Session = Depends(get_session_or_404),
