@@ -1,7 +1,8 @@
 """Session schemas."""
+from __future__ import annotations
+
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional, List
 from pydantic import BaseModel, Field
 from app.models.session import SessionStatus
 
@@ -9,8 +10,8 @@ from app.models.session import SessionStatus
 class SessionCreate(BaseModel):
     """Schema for creating a session."""
     host_name: str = Field(..., min_length=1, max_length=100)
-    latitude: Optional[float] = Field(None, ge=-90, le=90, description="GPS latitude for nearby discovery")
-    longitude: Optional[float] = Field(None, ge=-180, le=180, description="GPS longitude for nearby discovery")
+    latitude: float | None = Field(None, ge=-90, le=90, description="GPS latitude for nearby discovery")
+    longitude: float | None = Field(None, ge=-180, le=180, description="GPS longitude for nearby discovery")
 
 
 class AssignmentInItem(BaseModel):
@@ -31,7 +32,7 @@ class ItemInSession(BaseModel):
     quantity: int
     is_tax: bool
     is_tip_suggestion: bool
-    assignments: List[AssignmentInItem] = []
+    assignments: list[AssignmentInItem] = []
     
     class Config:
         from_attributes = True
@@ -42,8 +43,8 @@ class ParticipantInSession(BaseModel):
     id: str
     name: str
     is_host: bool
-    tip_percentage: Optional[Decimal] = None
-    tip_amount: Optional[Decimal] = None
+    tip_percentage: Decimal | None = None
+    tip_amount: Decimal | None = None
     
     class Config:
         from_attributes = True
@@ -55,7 +56,7 @@ class DiscountInSession(BaseModel):
     name: str
     discount_type: str
     value: Decimal
-    participant_id: Optional[str] = None
+    participant_id: str | None = None
     
     class Config:
         from_attributes = True
@@ -81,13 +82,13 @@ class SessionResponse(BaseModel):
     id: str
     code: str
     status: SessionStatus
-    receipt_image_path: Optional[str] = None
+    receipt_image_path: str | None = None
     created_at: datetime
     expires_at: datetime
-    items: List[ItemInSession] = []
-    participants: List[ParticipantInSession] = []
-    discounts: List[DiscountInSession] = []
-    host_token: Optional[str] = None  # Only returned on session creation
+    items: list[ItemInSession] = []
+    participants: list[ParticipantInSession] = []
+    discounts: list[DiscountInSession] = []
+    host_token: str | None = None  # Only returned on session creation
     
     class Config:
         from_attributes = True
@@ -111,8 +112,8 @@ class ParticipantSummary(BaseModel):
     tip_amount: Decimal
     discount_amount: Decimal = Decimal("0.00")
     total: Decimal
-    items: List[dict]
-    applied_discounts: List[AppliedDiscount] = []
+    items: list[dict]
+    applied_discounts: list[AppliedDiscount] = []
 
 
 class SessionSummary(BaseModel):
@@ -123,8 +124,8 @@ class SessionSummary(BaseModel):
     tax_total: Decimal
     total_discount: Decimal = Decimal("0.00")
     calculated_total: Decimal
-    participants: List[ParticipantSummary]
-    unassigned_items: List[dict]
+    participants: list[ParticipantSummary]
+    unassigned_items: list[dict]
 
 
 class NearbySession(BaseModel):
@@ -141,4 +142,4 @@ class NearbySession(BaseModel):
 
 class NearbySessionsResponse(BaseModel):
     """Schema for nearby sessions response."""
-    sessions: List[NearbySession]
+    sessions: list[NearbySession]

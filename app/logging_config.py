@@ -1,17 +1,18 @@
 """Structured logging configuration for production."""
+from __future__ import annotations
+
 import logging
 import sys
 import json
 import uuid
 from datetime import datetime, timezone
 from contextvars import ContextVar
-from typing import Optional
 
 # Context variable for request ID
-request_id_ctx: ContextVar[Optional[str]] = ContextVar("request_id", default=None)
+request_id_ctx: ContextVar[str | None] = ContextVar("request_id", default=None)
 
 
-def get_request_id() -> Optional[str]:
+def get_request_id() -> str | None:
     """Get the current request ID from context."""
     return request_id_ctx.get()
 
