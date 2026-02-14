@@ -102,38 +102,152 @@ class GeminiReceiptParser:
     AI call that understands receipt structure directly.
     """
     
-    RECEIPT_PROMPT = """Analyze this receipt image and extract all items with their prices.
+    RECEIPT_PROMPT = """You are a human reading a restaurant receipt. Your job is to understand what was ordered, exactly the way a person sitting at that table would.
 
-Return a JSON object with this exact structure:
+Think step by step:
+1. First, read the ENTIRE receipt from top to bottom.
+2. Understand the context — what kind of restaurant/bar/café is this? What cuisine?
+3. Then extract every ordered item, understanding what each line ACTUALLY means.
+
+Return a JSON object with this EXACT structure:
 {
     "items": [
         {
-            "name": "Item name (cleaned up, human readable)",
+            "name": "Human-readable item name",
             "price": 12.99,
             "quantity": 1,
             "is_tax": false,
-            "is_tip_suggestion": false
+            "is_tip_suggestion": false,
+            "is_refund": false
         }
     ],
-    "currency": "USD or ILS or EUR etc",
+    "discounts": [
+        {
+            "name": "Discount description",
+            "type": "fixed",
+            "value": 5.00
+        }
+    ],
+    "currency": "USD",
     "subtotal": 0.00,
     "tax": 0.00,
     "total": 0.00
 }
 
-Rules:
-1. Extract ALL food/drink items with their prices
-2. For items ordered multiple times (e.g., "2 x Coffee" or "Coffee x2" or quantity shown), set quantity accordingly
-3. Keep item names in their ORIGINAL language (Hebrew stays Hebrew, English stays English) - only remove garbled OCR artifacts
-4. Mark tax lines with is_tax: true
-5. Mark tip suggestion lines with is_tip_suggestion: true
-6. Ignore subtotals, totals, payment info, addresses, dates, receipt numbers
-7. Prices should be numbers (not strings)
-8. If you can't read a price clearly, skip that item
-9. Handle Hebrew, English, and mixed text - DO NOT translate
-10. For Hebrew receipts, the currency is likely ILS (₪)
+=== HOW TO READ ITEM NAMES (THINK LIKE A HUMAN) ===
+
+1. INFER UNCLEAR TEXT: Receipt printers often produce abbreviated, truncated, or garbled text. Do NOT output the raw garbled text. Instead, INFER what the item actually is based on context:
+   - "HMBRG" or "HMBRGR" → "Hamburger"
+   - "CHS FRIES" or "CHS FRS" → "Cheese Fries"
+   - "CHKN WNGS" → "Chicken Wings"
+   - "ESP DBL" → "Double Espresso"
+   - "MGR PIZZA" → "Margherita Pizza"
+   - "S.CHARGED" or "SRVC CHG" → "Service Charge"
+   - "קפה הפ" or truncated Hebrew → infer the full word (e.g., "קפה הפוך")
+   - If a word is partially cut off or corrupted, use the restaurant context + surrounding items + price to figure out what it most likely is
+   - Use the FULL human-readable name, not the abbreviation. A person reading this receipt would say "Hamburger", not "HMBRG".
+
+2. USE CONTEXT TO RESOLVE AMBIGUITY: If you're unsure what an item is, consider:
+   - What other items were ordered? (helps identify the restaurant type)
+   - What's the price? (a $2 item at a café is probably a coffee, not a steak)
+   - What language is the receipt in? (Hebrew receipt at a café → "הפוך" is likely "קפה הפוך")
+   - Common menu item patterns for that cuisine/restaurant type
+
+=== MODIFIERS AND ADD-ONS (MERGE WITH PARENT) ===
+
+3. ADDITIONS/MODIFIERS BELONG TO THE ITEM ABOVE THEM: Lines like "Add Cheese", "Extra Shot", "+Bacon", "תוספת גבינה", "ללא בצל" are NOT separate dishes — they are customizations of the item directly above them on the receipt.
+   
+   MERGE the modifier into the parent item:
+   - "Hamburger $15.00" then "Add Cheese +$2.00" → ONE item: {"name": "Hamburger + Cheese", "price": 17.00, "quantity": 1}
+   - "Pasta $22.00" then "Extra Sauce $1.50" then "Add Chicken $4.00" → ONE item: {"name": "Pasta + Extra Sauce + Chicken", "price": 27.50, "quantity": 1}
+   - "Espresso 12₪" then "חלב שקדים +3₪" → ONE item: {"name": "Espresso + חלב שקדים", "price": 15.00, "quantity": 1}
+   - "Salad $11.00" then "No Onions" (no price) → ONE item: {"name": "Salad (No Onions)", "price": 11.00, "quantity": 1}
+   
+   How to recognize modifiers:
+   - Lines starting with "Add", "Extra", "+", "Sub:", "No ", "Without", "With", "תוספת", "ללא", "עם"
+   - Lines with a small price (e.g., $0.50–$3.00) right after a main dish
+   - Lines with NO price that describe a variation (e.g., "No Ice", "Well Done", "ללא בצל")
+   - Indented lines or lines with a different formatting than main items
+
+=== STACKED/REPEATED ITEMS ===
+
+4. SAME ITEM ON CONSECUTIVE LINES = MULTIPLE QUANTITY:
+   If the SAME item name appears on consecutive lines with the SAME unit price, combine them:
+   - "Beer  $8.00" then "Beer  $8.00" → {"name": "Beer", "price": 16.00, "quantity": 2}
+   - "Espresso 12₪" × 3 lines → {"name": "Espresso", "price": 36.00, "quantity": 3}
+   
+   The "price" field = unit_price × quantity (the TOTAL for all units).
+   
+   BUT: If stacked items each have DIFFERENT modifiers, keep them separate:
+   - "Burger $15" + "Add Cheese $2" then "Burger $15" + "Add Bacon $3" → TWO separate items
+
+5. EXPLICIT QUANTITY MARKERS: "2 x Coffee $8.00", "Coffee x2 $8.00", "Qty: 3 Soda $12.00" → use the stated quantity, price is the total shown.
+
+=== SPECIAL LINE TYPES ===
+
+6. TAX/VAT: Lines like "Tax", "VAT", "Sales Tax", "מע״מ", "GST", "TVA" → is_tax: true
+
+7. TIP SUGGESTIONS: Lines like "Suggested tip: 18% = $5.40", "Tip 15%" → is_tip_suggestion: true. These are suggestions printed on the receipt, NOT actual charges.
+
+8. REFUNDED/VOIDED ITEMS: Items marked "VOID", "REFUND", "CANCEL", "CR", with a minus sign, or struck through → is_refund: true, price as a POSITIVE number.
+
+9. SERVICE CHARGES: "Service Charge", "שירות", "Gratuity" that are actual charges (not suggestions) → treat as regular items.
+
+=== DISCOUNTS ===
+
+10. Extract ALL discounts, coupons, promos, loyalty rewards, happy hour reductions into the "discounts" array:
+    - Percentage: {"name": "10% Loyalty Discount", "type": "percentage", "value": 10}
+    - Fixed: {"name": "$5 Coupon", "type": "fixed", "value": 5.00}
+    - Item-level discounts (e.g., "Happy Hour Beer -$2.00"): fixed discount with descriptive name
+    
+    Discounts are NOT items. Do NOT put them in the items array.
+    Discounts are NOT refunds. A refund removes a specific item; a discount reduces the price.
+
+=== TOTALS ===
+
+11. Read the printed subtotal, tax, and total EXACTLY as shown on the receipt.
+12. SELF-CHECK: Sum of non-tax, non-tip, non-refund item prices − discount values ≈ printed subtotal. If they don't match, re-examine for missed or duplicated items before returning.
+13. The "total" = final amount paid (after tax, after discounts).
+
+=== GENERAL ===
+
+14. Prices must be numbers (not strings).
+15. If a price is COMPLETELY unreadable, skip that item. But if the item name is unclear, INFER it — don't skip.
+16. Keep text in the ORIGINAL language but clean it up to be human-readable. "HMBRG" → "Hamburger", but "המבורגר" stays "המבורגר".
+17. Currency: Hebrew receipts with ₪ → "ILS". € → "EUR". Default "USD".
+18. Do NOT include: receipt headers, addresses, phone numbers, payment method details, change amounts, loyalty point balances, or marketing messages.
 
 Return ONLY valid JSON, no other text."""
+
+    CORRECTION_PROMPT_TEMPLATE = """I previously extracted these items from a receipt, but the total doesn't match.
+
+My extracted items (total: {items_total}):
+{items_list}
+
+My extracted discounts (total: {discounts_total}):
+{discounts_list}
+
+Receipt's printed subtotal: {receipt_subtotal}
+Receipt's printed tax: {receipt_tax}
+Receipt's printed total: {receipt_total}
+
+The difference is {difference}. Please re-examine the receipt image very carefully and return the CORRECTED JSON.
+
+Common problems to check:
+- Items that were DUPLICATED (same item listed twice when it should be quantity: 1)
+- Items that were MISSED entirely
+- Stacked items (same item on consecutive lines) that should be combined into one with higher quantity
+- Discounts or credits that were missed or wrongly included as items
+- Prices that were misread (e.g., reading $18.00 as $1.80)
+- Modifier/add-on lines that should be MERGED into the parent item above them (e.g., "Add Cheese +$2" belongs to the burger above it)
+- Abbreviated or garbled item names that need to be inferred (e.g., "HMBRG" = "Hamburger")
+
+Remember:
+- Modifier lines (Add, Extra, +, תוספת, etc.) should be merged into the item above them, combining their prices
+- Infer unclear/abbreviated item names from context
+- The "price" for items with quantity > 1 should be unit_price × quantity
+
+Return the full corrected JSON in the same format as before. Return ONLY valid JSON, no other text."""
 
     def __init__(self):
         settings = get_settings()
@@ -254,8 +368,9 @@ Return ONLY valid JSON, no other text."""
                 name = str(item.get("name", "")).strip()
                 price = float(item.get("price", 0))
                 quantity = int(item.get("quantity", 1))
+                is_refund = bool(item.get("is_refund", False))
                 
-                # Skip invalid items
+                # Skip invalid items (refund items must also have positive price)
                 if not name or price <= 0:
                     continue
                 
@@ -271,17 +386,153 @@ Return ONLY valid JSON, no other text."""
                     "quantity": quantity,
                     "is_tax": bool(item.get("is_tax", False)),
                     "is_tip_suggestion": bool(item.get("is_tip_suggestion", False)),
+                    "is_refund": is_refund,
+                })
+            except (ValueError, TypeError):
+                continue
+        
+        # Validate discounts
+        validated_discounts = []
+        for discount in result.get("discounts", []):
+            try:
+                name = str(discount.get("name", "")).strip()
+                dtype = str(discount.get("type", "fixed")).strip().lower()
+                value = float(discount.get("value", 0))
+                
+                if not name or value <= 0:
+                    continue
+                
+                # Normalize discount type
+                if dtype not in ("percentage", "fixed"):
+                    dtype = "fixed"
+                
+                # Percentage must be <= 100
+                if dtype == "percentage" and value > 100:
+                    continue
+                
+                validated_discounts.append({
+                    "name": name,
+                    "type": dtype,
+                    "value": Decimal(str(value)).quantize(Decimal('0.01')),
                 })
             except (ValueError, TypeError):
                 continue
         
         return {
             "items": validated_items,
+            "discounts": validated_discounts,
             "currency": result.get("currency", "USD"),
             "subtotal": Decimal(str(result.get("subtotal", 0))).quantize(Decimal('0.01')),
             "tax": Decimal(str(result.get("tax", 0))).quantize(Decimal('0.01')),
             "total": Decimal(str(result.get("total", 0))).quantize(Decimal('0.01')),
         }
+
+    async def _retry_with_correction(
+        self, image_bytes: bytes, original_result: dict[str, Any]
+    ) -> dict[str, Any]:
+        """
+        Make a second Gemini call to correct a mismatch between items and totals.
+        
+        Args:
+            image_bytes: Original image bytes
+            original_result: The first parse result with items/discounts/totals
+            
+        Returns:
+            Corrected result dict, or original if retry fails
+        """
+        # Build items list for the correction prompt
+        items_lines = []
+        for item in original_result["items"]:
+            flags = []
+            if item["is_tax"]:
+                flags.append("TAX")
+            if item["is_refund"]:
+                flags.append("REFUND")
+            if item["is_tip_suggestion"]:
+                flags.append("TIP")
+            flag_str = f" [{', '.join(flags)}]" if flags else ""
+            items_lines.append(
+                f"  - {item['name']} × {item['quantity']} = {item['price']}{flag_str}"
+            )
+        
+        discounts_lines = []
+        discounts_total = Decimal("0.00")
+        for d in original_result.get("discounts", []):
+            if d["type"] == "percentage":
+                discounts_lines.append(f"  - {d['name']}: {d['value']}%")
+            else:
+                discounts_lines.append(f"  - {d['name']}: {d['value']}")
+                discounts_total += d["value"]
+        
+        # Calculate items total (non-tax, non-tip, non-refund)
+        items_total = sum(
+            item["price"] * item["quantity"]
+            for item in original_result["items"]
+            if not item["is_tax"] and not item["is_tip_suggestion"] and not item["is_refund"]
+        )
+        
+        difference = items_total - discounts_total - original_result["subtotal"]
+        
+        correction_prompt = self.CORRECTION_PROMPT_TEMPLATE.format(
+            items_total=items_total,
+            items_list="\n".join(items_lines) if items_lines else "  (none)",
+            discounts_total=discounts_total,
+            discounts_list="\n".join(discounts_lines) if discounts_lines else "  (none)",
+            receipt_subtotal=original_result["subtotal"],
+            receipt_tax=original_result["tax"],
+            receipt_total=original_result["total"],
+            difference=difference,
+        )
+        
+        # Check daily limit for retry call
+        limiter = _get_daily_limiter()
+        if not limiter.acquire():
+            logger.warning("Daily limit reached, skipping correction retry")
+            return original_result
+        
+        try:
+            image = Image.open(io.BytesIO(image_bytes))
+            if image.mode == 'RGBA':
+                image = image.convert('RGB')
+            
+            model = self._get_client()
+            
+            response = await asyncio.wait_for(
+                asyncio.to_thread(
+                    model.generate_content,
+                    [correction_prompt, image]
+                ),
+                timeout=60,
+            )
+            
+            response_text = response.text.strip()
+            
+            # Handle markdown code blocks
+            if response_text.startswith('```'):
+                lines = response_text.split('\n')
+                json_lines = []
+                in_json = False
+                for line in lines:
+                    if line.startswith('```'):
+                        in_json = not in_json
+                        continue
+                    if in_json or not line.startswith('```'):
+                        json_lines.append(line)
+                response_text = '\n'.join(json_lines)
+            
+            corrected = json.loads(response_text)
+            corrected_result = self._validate_result(corrected)
+            
+            logger.info("Correction retry succeeded, using corrected result")
+            return corrected_result
+            
+        except Exception as e:
+            logger.warning(f"Correction retry failed: {e}, using original result")
+            return original_result
+
+
+# Mismatch threshold: if item sum vs receipt subtotal differs by more than this, retry
+MISMATCH_THRESHOLD = Decimal("1.00")
 
 
 class OCRService:
@@ -289,6 +540,7 @@ class OCRService:
     Main service for processing receipt images.
     
     Uses Google Gemini for AI-powered receipt recognition.
+    Includes mismatch detection with automatic corrective retry.
     """
     
     def __init__(self):
@@ -304,10 +556,83 @@ class OCRService:
         Returns:
             Dict containing:
                 - raw_text: Description of what was found
-                - items: List of extracted items
+                - items: List of extracted items (with is_refund flag)
+                - discounts: List of extracted discounts
                 - summary: Receipt summary
+                - warnings: List of warning messages
+                - mismatch_retried: Whether a correction retry was attempted
         """
         result = await self.parser.parse_receipt(image_bytes)
+        
+        warnings = []
+        mismatch_retried = False
+        
+        # Check for errors from parse_receipt (e.g., JSON decode failure)
+        if result.get("error"):
+            warnings.append(result["error"])
+        
+        # Calculate items subtotal (non-tax, non-tip, non-refund)
+        items_subtotal = sum(
+            item["price"] * item["quantity"]
+            for item in result["items"]
+            if not item["is_tax"] and not item["is_tip_suggestion"] and not item["is_refund"]
+        )
+        
+        # Calculate discount total (fixed discounts only for subtotal comparison)
+        fixed_discounts_total = sum(
+            d["value"] for d in result.get("discounts", [])
+            if d["type"] == "fixed"
+        )
+        
+        # Check for total mismatch — compare computed items subtotal against receipt's subtotal
+        receipt_subtotal = result.get("subtotal", Decimal("0.00"))
+        receipt_total = result.get("total", Decimal("0.00"))
+        
+        if receipt_subtotal > Decimal("0"):
+            difference = abs(items_subtotal - fixed_discounts_total - receipt_subtotal)
+            if difference > MISMATCH_THRESHOLD:
+                logger.warning(
+                    f"Total mismatch detected: items={items_subtotal}, "
+                    f"discounts={fixed_discounts_total}, receipt_subtotal={receipt_subtotal}, "
+                    f"difference={difference}"
+                )
+                
+                # Attempt corrective retry
+                corrected = await self.parser._retry_with_correction(image_bytes, result)
+                mismatch_retried = True
+                
+                # Check if corrected result is better
+                corrected_subtotal = sum(
+                    item["price"] * item["quantity"]
+                    for item in corrected["items"]
+                    if not item["is_tax"] and not item["is_tip_suggestion"] and not item["is_refund"]
+                )
+                corrected_fixed_discounts = sum(
+                    d["value"] for d in corrected.get("discounts", [])
+                    if d["type"] == "fixed"
+                )
+                corrected_diff = abs(corrected_subtotal - corrected_fixed_discounts - receipt_subtotal)
+                
+                if corrected_diff < difference:
+                    logger.info(
+                        f"Corrected result is better: diff {corrected_diff} < {difference}"
+                    )
+                    result = corrected
+                    items_subtotal = corrected_subtotal
+                    fixed_discounts_total = corrected_fixed_discounts
+                    
+                    if corrected_diff > MISMATCH_THRESHOLD:
+                        warnings.append(
+                            f"Items may not match receipt total. "
+                            f"Extracted items: {items_subtotal}, Receipt subtotal: {receipt_subtotal}. "
+                            f"Please review items manually."
+                        )
+                else:
+                    warnings.append(
+                        f"Items may not match receipt total. "
+                        f"Extracted items: {items_subtotal}, Receipt subtotal: {receipt_subtotal}. "
+                        f"Please review items manually."
+                    )
         
         # Convert to format expected by the rest of the app
         items = []
@@ -318,14 +643,19 @@ class OCRService:
                 "quantity": item["quantity"],
                 "is_tax": item["is_tax"],
                 "is_tip_suggestion": item["is_tip_suggestion"],
+                "is_refund": item.get("is_refund", False),
             })
         
-        # Calculate summary
-        items_subtotal = sum(
-            Decimal(i["price"]) * i["quantity"] 
-            for i in items 
-            if not i["is_tax"] and not i["is_tip_suggestion"]
-        )
+        # Convert discounts
+        discounts = []
+        for d in result.get("discounts", []):
+            discounts.append({
+                "name": d["name"],
+                "type": d["type"],
+                "value": str(d["value"]),
+            })
+        
+        # Recalculate summary with final values
         tax_total = sum(
             Decimal(i["price"]) * i["quantity"]
             for i in items
@@ -335,10 +665,15 @@ class OCRService:
         return {
             "raw_text": f"Gemini AI parsed {len(items)} items from receipt",
             "items": items,
+            "discounts": discounts,
             "summary": {
                 "currency": result["currency"],
                 "items_subtotal": str(items_subtotal),
                 "tax_total": str(tax_total),
                 "estimated_total": str(items_subtotal + tax_total),
-            }
+                "receipt_subtotal": str(result.get("subtotal", Decimal("0.00"))),
+                "receipt_total": str(result.get("total", Decimal("0.00"))),
+            },
+            "warnings": warnings,
+            "mismatch_retried": mismatch_retried,
         }

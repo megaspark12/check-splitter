@@ -18,6 +18,7 @@ class ItemProtocol(Protocol):
     quantity: int
     is_tax: bool
     is_tip_suggestion: bool
+    is_refund: bool
 
 
 class AssignmentProtocol(Protocol):
@@ -256,8 +257,8 @@ class BillCalculator:
         """
         discounts = discounts or []
         
-        # Separate regular items from tax items
-        regular_items = [i for i in items if not i.is_tax and not i.is_tip_suggestion]
+        # Separate regular items from tax items (exclude refunds from splitting)
+        regular_items = [i for i in items if not i.is_tax and not i.is_tip_suggestion and not i.is_refund]
         tax_items = [i for i in items if i.is_tax]
         
         # Calculate total tax

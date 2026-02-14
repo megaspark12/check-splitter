@@ -21,6 +21,7 @@ class _Item:
     quantity: int = 1
     is_tax: bool = False
     is_tip_suggestion: bool = False
+    is_refund: bool = False
 
 
 @dataclass
@@ -475,3 +476,54 @@ class TestBillCalculatorEdgeCases:
         result = calculator.calculate_item_share(item, assignments)
         
         assert result["p1"] == Decimal("9999.99")
+
+
+class TestBillCalculatorRefundExclusion:
+    """Tests that refund items are excluded from bill splitting."""
+    
+    def test_refund_items_excluded_from_regular_split(self):
+        """Refund items should not be included in the split calculation."""
+        from app.services.calculator import BillCalculator
+        
+        items = [
+            _Item(id="item1", name="Burger", price=Decimal("15.00")),
+            _Item(id="item2", name="Fries", price=Decimal("5.00")),
+            _Item(id="refund1", name="Refunded Drink", price=Decimal("8.00"), is_refund=True),
+        ]
+        participants = [
+            _Participant(id="p1", name="Alice"),
+        ]
+        assignments = [
+            _Assignment(item_id="item1", participant_id="p1"),
+            _Assignment(item_id="item2", participant_id="p1"),
+        ]
+        
+        calculator = BillCalculator()
+        result = calculator.calculate_full_split(items, participants, assignments)
+        
+        # Should only include burger + fries, not the refunded drink
+        assert result["p1"]["items_subtotal"] == Decimal("20.00")
+        # Refund item should be in unassigned list (it's not assigned)
+        # but it won't show up because refunds are filtered out of regular_items
+        assert len(result["p1"]["items"]) == 2
+    
+    def test_refund_items_not_in_unassigned(self):
+        """Refund items should not appear in unassigned items list."""
+        from app.services.calculator import BillCalculator
+        
+        items = [
+            _Item(id="item1", name="Burger", price=Decimal("15.00")),
+            _Item(id="refund1", name="Refunded Drink", price=Decimal("8.00"), is_refund=True),
+        ]
+        participants = [
+            _Participant(id="p1", name="Alice"),
+        ]
+        assignments = [
+            _Assignment(item_id="item1", participant_id="p1"),
+        ]
+        
+        calculator = BillCalculator()
+        result = calculator.calculate_full_split(items, participants, assignments)
+        
+        unassigned_ids = [u["id"] for u in result["unassigned_items"]]
+        assert "refund1" not in unassigned_ids

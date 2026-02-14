@@ -1016,7 +1016,7 @@ async function loadSession(code) {
         if (session.items && session.items.length > 0) {
             displayItems(session.items, session.participants);
             document.getElementById('items-section').hidden = false;
-            document.getElementById('items-count').textContent = session.items.filter(i => !i.is_tax && !i.is_tip_suggestion).length;
+            document.getElementById('items-count').textContent = session.items.filter(i => !i.is_tax && !i.is_tip_suggestion && !i.is_refund).length;
             updateStepIndicator(2);
             updateHostTotal();
             await updateSummary(); // Auto-calculate summary
@@ -1178,8 +1178,9 @@ async function uploadReceipt() {
 function displayItems(items, participants = []) {
     const list = document.getElementById('items-list');
     
-    const regularItems = items.filter(i => !i.is_tax && !i.is_tip_suggestion);
+    const regularItems = items.filter(i => !i.is_tax && !i.is_tip_suggestion && !i.is_refund);
     const taxItems = items.filter(i => i.is_tax);
+    const refundItems = items.filter(i => i.is_refund);
     
     // Combined view: selectable items with delete button (host only)
     list.innerHTML = regularItems.map(item => {
@@ -1218,7 +1219,13 @@ function displayItems(items, participants = []) {
                 <button class="item-delete" onclick="event.stopPropagation(); deleteItem('${item.id}')" title="Remove">✕</button>
             </div>
         `;
-    }).join('') + taxItems.map(item => `
+    }).join('') + refundItems.map(item => `
+        <div class="item-row refund-item" data-id="${item.id}">
+            <span class="item-name">↩️ <s>${item.name}</s></span>
+            <span class="item-price refund-price">-${formatCurrency(item.price)}</span>
+            <button class="item-delete" onclick="event.stopPropagation(); deleteItem('${item.id}')" title="Remove">✕</button>
+        </div>
+    `).join('') + taxItems.map(item => `
         <div class="item-row tax-item" data-id="${item.id}">
             <span class="item-name">🏷️ ${item.name}</span>
             <span class="item-price">${formatCurrency(item.price)}</span>
@@ -1278,7 +1285,7 @@ async function toggleHostItemSelection(itemId) {
 function updateHostTotal() {
     if (!currentSession || !currentParticipant) return;
     
-    const items = currentSession.items.filter(i => !i.is_tax && !i.is_tip_suggestion);
+    const items = currentSession.items.filter(i => !i.is_tax && !i.is_tip_suggestion && !i.is_refund);
     const taxItem = currentSession.items.find(i => i.is_tax);
     
     let myItemsTotal = 0;
@@ -1451,7 +1458,8 @@ async function loadParticipantView() {
         const participants = session.participants;
         
         const list = document.getElementById('participant-items-list');
-        const items = session.items.filter(i => !i.is_tax && !i.is_tip_suggestion);
+        const items = session.items.filter(i => !i.is_tax && !i.is_tip_suggestion && !i.is_refund);
+        const refundItems = session.items.filter(i => i.is_refund);
         
         // Always setup participant code actions (copy, QR, share, leave)
         setupParticipantCodeActions();
@@ -1504,7 +1512,12 @@ async function loadParticipantView() {
                     <span class="item-price">${formatCurrency(item.price)}</span>
                 </div>
             `;
-        }).join('');
+        }).join('') + refundItems.map(item => `
+            <div class="item-row refund-item" data-id="${item.id}">
+                <span class="item-name">↩️ <s>${item.name}</s></span>
+                <span class="item-price refund-price">-${formatCurrency(item.price)}</span>
+            </div>
+        `).join('');
         
         // Render discounts for participant view
         renderParticipantDiscounts();
@@ -1894,7 +1907,7 @@ async function updateYourTotalFromServer() {
 
 function updateYourTotalLocal() {
     // Local calculation fallback (without discounts)
-    const items = currentSession.items.filter(i => !i.is_tax && !i.is_tip_suggestion);
+    const items = currentSession.items.filter(i => !i.is_tax && !i.is_tip_suggestion && !i.is_refund);
     const taxItem = currentSession.items.find(i => i.is_tax);
     
     let itemsTotal = 0;

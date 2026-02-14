@@ -18,6 +18,7 @@ class Item(Base):
     quantity = Column(Integer, default=1, nullable=False)
     is_tax = Column(Boolean, default=False, nullable=False)
     is_tip_suggestion = Column(Boolean, default=False, nullable=False)
+    is_refund = Column(Boolean, default=False, nullable=False)
     position = Column(Integer, default=0, nullable=False)
     
     # Relationships

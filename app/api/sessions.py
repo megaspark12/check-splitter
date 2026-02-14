@@ -26,6 +26,7 @@ from app.services.ocr_service import OCRService
 from app.services.storage_service import get_storage_backend
 from app.services.geolocation import create_location_hash, get_geohash_neighbors
 from app.models.item import Item
+from app.models.discount import Discount, DiscountType
 from app.models.session import Session, SessionStatus
 from app.api.dependencies import require_host_token, get_session_or_404
 from app.websocket_manager import manager
@@ -43,6 +44,7 @@ class _Item:
     quantity: int
     is_tax: bool
     is_tip_suggestion: bool
+    is_refund: bool
 
 
 @dataclass
@@ -352,10 +354,11 @@ async def upload_receipt(
         for item_data in result["items"]:
             quantity = item_data["quantity"]
             price = Decimal(item_data["price"])
+            is_refund = item_data.get("is_refund", False)
             
             # For items with quantity > 1, split into individual items
-            # Calculate per-item price
-            if quantity > 1 and not item_data["is_tax"] and not item_data["is_tip_suggestion"]:
+            # Calculate per-item price (skip splitting for tax/tip/refund items)
+            if quantity > 1 and not item_data["is_tax"] and not item_data["is_tip_suggestion"] and not is_refund:
                 per_item_price = (price / quantity).quantize(Decimal('0.01'))
                 # Handle rounding - last item gets any remainder
                 remainder = price - (per_item_price * quantity)
@@ -372,13 +375,14 @@ async def upload_receipt(
                         quantity=1,
                         is_tax=False,
                         is_tip_suggestion=False,
+                        is_refund=False,
                         position=position,
                     )
                     db.add(item)
                     position += 1
                     total_items += 1
             else:
-                # Single item or tax/tip - add as-is
+                # Single item, tax/tip, or refund — add as-is
                 item = Item(
                     session_id=session.id,
                     name=item_data["name"],
@@ -386,11 +390,30 @@ async def upload_receipt(
                     quantity=1,
                     is_tax=item_data["is_tax"],
                     is_tip_suggestion=item_data["is_tip_suggestion"],
+                    is_refund=is_refund,
                     position=position,
                 )
                 db.add(item)
                 position += 1
                 total_items += 1
+        
+        # Auto-create Discount records from OCR-extracted discounts
+        discounts_created = 0
+        for disc_data in result.get("discounts", []):
+            disc_type = (
+                DiscountType.PERCENTAGE 
+                if disc_data["type"] == "percentage" 
+                else DiscountType.FIXED
+            )
+            discount = Discount(
+                session_id=session.id,
+                participant_id=None,  # Bill-wide discount
+                name=disc_data["name"],
+                discount_type=disc_type,
+                value=Decimal(disc_data["value"]),
+            )
+            db.add(discount)
+            discounts_created += 1
         
         # Handle edge case: no items detected
         if total_items == 0:
@@ -407,13 +430,25 @@ async def upload_receipt(
         # Notify all connected clients about new items
         await manager.notify_session_update(code.upper())
         
-        return {
+        # Build response
+        response_data = {
             "message": "Receipt processed successfully",
             "items_found": total_items,
+            "discounts_found": discounts_created,
             "raw_text": result["raw_text"],
             "summary": result["summary"],
+            "mismatch_retried": result.get("mismatch_retried", False),
         }
         
+        # Include warnings if any
+        warnings = result.get("warnings", [])
+        if warnings:
+            response_data["warnings"] = warnings
+        
+        return response_data
+        
+    except HTTPException:
+        raise
     except Exception as e:
         session.status = SessionStatus.PENDING
         await db.commit()
@@ -469,6 +504,7 @@ async def get_session_summary(
             quantity=item.quantity,
             is_tax=item.is_tax,
             is_tip_suggestion=item.is_tip_suggestion,
+            is_refund=item.is_refund,
         )
         for item in session.items
     ]

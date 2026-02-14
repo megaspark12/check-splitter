@@ -876,6 +876,25 @@ input::placeholder {
     background: rgba(245, 158, 11, 0.15);
 }
 
+.item-row.refund-item {
+    background: rgba(239, 68, 68, 0.08);
+    cursor: default;
+    opacity: 0.85;
+}
+
+.item-row.refund-item:hover {
+    background: rgba(239, 68, 68, 0.12);
+}
+
+.item-row.refund-item .item-name {
+    color: var(--text-secondary);
+}
+
+.refund-price {
+    color: #ef4444 !important;
+    font-weight: 600;
+}
+
 /* ===== Selectable Items ===== */
 .selectable .item-row {
     cursor: pointer;

@@ -12,6 +12,7 @@ class ItemCreate(BaseModel):
     quantity: int = Field(default=1, ge=1)
     is_tax: bool = False
     is_tip_suggestion: bool = False
+    is_refund: bool = False
 
 
 class ItemUpdate(BaseModel):
@@ -21,6 +22,7 @@ class ItemUpdate(BaseModel):
     quantity: int | None = Field(None, ge=1)
     is_tax: bool | None = None
     is_tip_suggestion: bool | None = None
+    is_refund: bool | None = None
 
 
 class ItemResponse(BaseModel):
@@ -32,6 +34,7 @@ class ItemResponse(BaseModel):
     quantity: int
     is_tax: bool
     is_tip_suggestion: bool
+    is_refund: bool
     position: int
     
     class Config:
